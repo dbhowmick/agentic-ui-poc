@@ -10,8 +10,7 @@ defmodule AgenticUi.Application do
     children = [
       AgenticUiWeb.Telemetry,
       AgenticUi.Repo,
-      {DNSCluster,
-       query: Application.get_env(:agentic_ui, :dns_cluster_query) || :ignore},
+      {DNSCluster, query: Application.get_env(:agentic_ui, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: AgenticUi.PubSub},
       {Oban, Application.fetch_env!(:agentic_ui, Oban)},
       AgenticUi.Jido,

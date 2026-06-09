@@ -35,8 +35,12 @@ defmodule AgenticUiWeb.ChatChannel do
 
   defp ensure_agent(id) do
     case AgenticUi.Jido.whereis(id) do
-      nil -> AgenticUi.Jido.start_agent(LLM.Agent, id: id)
-      pid -> {:ok, pid}
+      nil ->
+        initial_state = LLM.Agent.build_initial_state(Chat.list_messages(id))
+        AgenticUi.Jido.start_agent(LLM.Agent, id: id, initial_state: initial_state)
+
+      pid ->
+        {:ok, pid}
     end
   end
 
@@ -107,9 +111,10 @@ defmodule AgenticUiWeb.ChatChannel do
   end
 
   # Iterate the Jido.AI runtime event stream and forward content deltas to the
-  # channel. Returns the accumulated assistant text. See deps/jido_ai/lib/
-  # jido_ai/signals/*.ex for the full signal catalog; for Phase 0 we only care
-  # about "ai.llm.delta" tokens.
+  # channel. Returns the accumulated assistant text. See
+  # `Jido.AI.Runtime.Event` for the canonical envelope; per-turn we care about
+  # `:llm_delta` (chunk_type :content) for streaming text. Thinking deltas
+  # are dropped here.
   defp relay_stream(events, channel_pid) do
     Enum.reduce(events, "", fn event, acc ->
       case extract_delta(event) do
@@ -123,11 +128,13 @@ defmodule AgenticUiWeb.ChatChannel do
     end)
   end
 
-  defp extract_delta(%{type: "ai.llm.delta", data: %{delta: delta, chunk_type: :content}}),
-    do: {:content, delta}
-
-  defp extract_delta(%{type: "ai.llm.delta", data: %{delta: delta}}),
-    do: {:content, delta}
+  defp extract_delta(%{kind: :llm_delta, data: %{delta: delta} = data})
+       when is_binary(delta) and delta != "" do
+    case Map.get(data, :chunk_type, :content) do
+      :content -> {:content, delta}
+      _ -> :ignore
+    end
+  end
 
   defp extract_delta(_), do: :ignore
 end

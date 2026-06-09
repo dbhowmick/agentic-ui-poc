@@ -3,6 +3,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import '@meldui/vue/themes/default';
+@import '@incremark/vue/style.css';
 
 /* Tailwind v4 source scanning — needed so utility classes used inside the
    meldui component library (under node_modules/@meldui/vue/dist) are
