@@ -20,6 +20,9 @@ importers:
       '@incremark/vue':
         specifier: ^0.3.10
         version: 0.3.10(katex@0.16.47)(react@19.2.7)(vue@3.5.35(typescript@6.0.3))
+      '@meldui/a2ui':
+        specifier: ^0.1.0
+        version: 0.1.0(@meldui/charts-vue@0.3.3(@meldui/vue@0.3.3(645e194c34e8cc8a017b589b8385077a))(vue@3.5.35(typescript@6.0.3)))(@meldui/tabler-vue@0.1.6(vue@3.5.35(typescript@6.0.3)))(@meldui/vue@0.3.3(645e194c34e8cc8a017b589b8385077a))(katex@0.16.47)(react@19.2.7)(vue@3.5.35(typescript@6.0.3))
       '@meldui/charts-vue':
         specifier: ^0.3.2
         version: 0.3.3(@meldui/vue@0.3.3(645e194c34e8cc8a017b589b8385077a))(vue@3.5.35(typescript@6.0.3))
@@ -122,6 +125,9 @@ importers:
         version: 3.3.4(typescript@6.0.3)
 
 packages:
+
+  '@a2ui/web_core@0.10.0':
+    resolution: {integrity: sha512-pSieKxaB6aZWBL2LjZfKo4/1v4xMWylczpzte1ehuGH0kfNGf/iTd73PKsIKYx3b0FNWTbD8gAloOM4JCVqUig==}
 
   '@antfu/utils@9.3.0':
     resolution: {integrity: sha512-9hFT4RauhcUzqOE4f1+frMKLZrgNog5b06I7VmZQV1BkvwvqrbC8EBZf3L1eEL2AKb6rNKjER0sEvJiSP1FXEA==}
@@ -821,6 +827,14 @@ packages:
     resolution: {integrity: sha512-Es6WcD0nO5l+2BOQS4uLfNPYQaNDfbot3X1XUoloz+x0mPDS3eeORZJl06HXjwBG1fOGwCRnzK88LMdxKRrd6Q==}
     engines: {node: '>=6.0.0'}
 
+  '@meldui/a2ui@0.1.0':
+    resolution: {integrity: sha512-3WbI5490ns4SCCYqSw3XqEdEXX3FGFAPVyfYTHXG1/M5BPoIbzyWIjJz2Tr/q3BJhx/Z/Z7Dm1FP+qnzR92ZnA==, tarball: https://npm.pkg.github.com/download/@meldui/a2ui/0.1.0/1fb47c58ab368b80c2494ae1c1bb6223f4fafcc9}
+    peerDependencies:
+      '@meldui/charts-vue': 0.3.3
+      '@meldui/tabler-vue': 0.1.6
+      '@meldui/vue': 0.3.3
+      vue: ^3.5.0
+
   '@meldui/charts-vue@0.3.3':
     resolution: {integrity: sha512-2Vyti7mnF95NRp9xZ7m9j/OeYpflfB5I9yrGlCauZUdLVL2gHn5HUK0tA0XBTuHIA/DJ+hZGtZ1omo4Z0dxC6Q==, tarball: https://npm.pkg.github.com/download/@meldui/charts-vue/0.3.3/f7e40d22fb92692b3c0af3ea00a73dacda879757}
     peerDependencies:
@@ -1193,6 +1207,9 @@ packages:
 
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
+
+  '@preact/signals-core@1.14.2':
+    resolution: {integrity: sha512-RZHdBj9ZF4n40Rp4jS052EHHjBWf96P9oNdXPfhQTovCuWY9iQn3Gq+gOTJSgBO9A/JBuPfMOWsSX/lIU9Pc/A==}
 
   '@rolldown/binding-android-arm64@1.0.3':
     resolution: {integrity: sha512-454rs7jHngixp/NMxd5srYD57OnzSlZ/eFTETjORQHLwJG1lRtmNOJcBerZlfu4GjKqeq8aCCIQrMdHyhI51Hw==}
@@ -2218,6 +2235,9 @@ packages:
   d3@7.9.0:
     resolution: {integrity: sha512-e1U46jVP+w7Iut8Jt8ri1YsPOvFpg46k+K8TpCb0P+zjCkjkPnV7WzfDJzMHy1LnA+wj5pLT1wjO901gLXeEhA==}
     engines: {node: '>=12'}
+
+  date-fns@4.4.0:
+    resolution: {integrity: sha512-+1UMbeh68lH1SegH83CGWwpb6OHHbpSgr3+s5Eww5M4CAgswBpoWS0AjTOfEJ33HiYKz1hdj/KTFprzXHmq/6w==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -3656,6 +3676,14 @@ packages:
   zimmerframe@1.1.4:
     resolution: {integrity: sha512-B58NGBEoc8Y9MWWCQGl/gq9xBCe4IiKM0a2x7GZdQKOW5Exr8S1W24J6OgM1njK8xCRGvAJIL/MxXHf6SkmQKQ==}
 
+  zod-to-json-schema@3.25.2:
+    resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
+    peerDependencies:
+      zod: ^3.25.28 || ^4
+
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zrender@6.1.0:
     resolution: {integrity: sha512-oEGMDB6pOP2S6OwRR4PdVv610zrjnA3Bh+JnSG12fYJlBKjtNAoEb5fSUoCOOINlH96I2fU38/A2UpRKs67xYQ==}
 
@@ -3663,6 +3691,13 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@a2ui/web_core@0.10.0':
+    dependencies:
+      '@preact/signals-core': 1.14.2
+      date-fns: 4.4.0
+      zod: 3.25.76
+      zod-to-json-schema: 3.25.2(zod@3.25.76)
 
   '@antfu/utils@9.3.0': {}
 
@@ -4512,6 +4547,23 @@ snapshots:
 
   '@mapbox/whoots-js@3.1.0': {}
 
+  '@meldui/a2ui@0.1.0(@meldui/charts-vue@0.3.3(@meldui/vue@0.3.3(645e194c34e8cc8a017b589b8385077a))(vue@3.5.35(typescript@6.0.3)))(@meldui/tabler-vue@0.1.6(vue@3.5.35(typescript@6.0.3)))(@meldui/vue@0.3.3(645e194c34e8cc8a017b589b8385077a))(katex@0.16.47)(react@19.2.7)(vue@3.5.35(typescript@6.0.3))':
+    dependencies:
+      '@a2ui/web_core': 0.10.0
+      '@incremark/theme': 0.3.10
+      '@incremark/vue': 0.3.10(katex@0.16.47)(react@19.2.7)(vue@3.5.35(typescript@6.0.3))
+      '@meldui/charts-vue': 0.3.3(@meldui/vue@0.3.3(645e194c34e8cc8a017b589b8385077a))(vue@3.5.35(typescript@6.0.3))
+      '@meldui/tabler-vue': 0.1.6(vue@3.5.35(typescript@6.0.3))
+      '@meldui/vue': 0.3.3(645e194c34e8cc8a017b589b8385077a)
+      vue: 3.5.35(typescript@6.0.3)
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - katex
+      - mermaid
+      - react
+      - solid-js
+      - supports-color
+
   '@meldui/charts-vue@0.3.3(@meldui/vue@0.3.3(645e194c34e8cc8a017b589b8385077a))(vue@3.5.35(typescript@6.0.3))':
     dependencies:
       '@meldui/vue': 0.3.3(645e194c34e8cc8a017b589b8385077a)
@@ -4733,6 +4785,8 @@ snapshots:
     optional: true
 
   '@polka/url@1.0.0-next.29': {}
+
+  '@preact/signals-core@1.14.2': {}
 
   '@rolldown/binding-android-arm64@1.0.3':
     optional: true
@@ -5901,6 +5955,8 @@ snapshots:
       d3-timer: 3.0.1
       d3-transition: 3.0.1(d3-selection@3.0.0)
       d3-zoom: 3.0.0
+
+  date-fns@4.4.0: {}
 
   debug@4.4.3:
     dependencies:
@@ -7526,6 +7582,12 @@ snapshots:
 
   zimmerframe@1.1.4:
     optional: true
+
+  zod-to-json-schema@3.25.2(zod@3.25.76):
+    dependencies:
+      zod: 3.25.76
+
+  zod@3.25.76: {}
 
   zrender@6.1.0:
     dependencies:

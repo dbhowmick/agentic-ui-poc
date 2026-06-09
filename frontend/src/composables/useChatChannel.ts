@@ -1,7 +1,7 @@
 import { onBeforeUnmount, ref, shallowRef } from 'vue'
 import type { Channel } from 'phoenix'
 import { getSocket } from '@/lib/socket'
-import type { Message } from '@/types/chat'
+import type { A2UIEnvelope, Message, SurfaceReplay } from '@/types/chat'
 
 interface HistoryPayload {
   messages: Message[]
@@ -15,12 +15,18 @@ interface ErrorPayload {
   message: string
 }
 
+interface ReplayPayload {
+  surfaces: SurfaceReplay[]
+}
+
 export interface UseChatChannel {
   messages: ReturnType<typeof ref<Message[]>>
   streaming: ReturnType<typeof ref<boolean>>
   ready: ReturnType<typeof ref<boolean>>
   error: ReturnType<typeof ref<string | null>>
+  envelopes: ReturnType<typeof ref<A2UIEnvelope[]>>
   send: (content: string) => void
+  sendAction: (action: unknown) => void
 }
 
 function tempId(prefix: string) {
@@ -32,6 +38,7 @@ export function useChatChannel(conversationId: string): UseChatChannel {
   const streaming = ref(false)
   const ready = ref(false)
   const error = ref<string | null>(null)
+  const envelopes = ref<A2UIEnvelope[]>([])
   const channelRef = shallowRef<Channel | null>(null)
   const streamingId = ref<string | null>(null)
 
@@ -55,6 +62,18 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     error.value = message
     streaming.value = false
     streamingId.value = null
+  })
+
+  channel.on('a2ui_replay', ({ surfaces }: ReplayPayload) => {
+    // Flatten persisted envelope logs across all surfaces in arrival order.
+    // Per-surface ordering inside each log is preserved; cross-surface ordering
+    // falls back to updated_at — Phase 3 only exercises a single surface.
+    const sorted = [...surfaces].sort((a, b) => a.updated_at.localeCompare(b.updated_at))
+    envelopes.value = sorted.flatMap((s) => s.envelope_log)
+  })
+
+  channel.on('a2ui_envelope', (envelope: A2UIEnvelope) => {
+    envelopes.value = [...envelopes.value, envelope]
   })
 
   channel
@@ -116,10 +135,14 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     })
   }
 
+  function sendAction(action: unknown) {
+    channel.push('a2ui_action', action as object)
+  }
+
   onBeforeUnmount(() => {
     channelRef.value?.leave()
     channelRef.value = null
   })
 
-  return { messages, streaming, ready, error, send }
+  return { messages, streaming, ready, error, envelopes, send, sendAction }
 }

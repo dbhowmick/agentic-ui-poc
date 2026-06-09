@@ -19,6 +19,7 @@
     "@fontsource-variable/geist": "^5.2.8",
     "@incremark/theme": "^0.3.10",
     "@incremark/vue": "^0.3.10",
+    "@meldui/a2ui": "^0.1.0",
     "@meldui/charts-vue": "^0.3.2",
     "@meldui/tabler-vue": "^0.1.6",
     "@meldui/vue": "^0.3.2",

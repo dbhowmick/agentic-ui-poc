@@ -11,6 +11,7 @@ defmodule AgenticUiWeb.ChatChannel do
   require Logger
 
   alias AgenticUi.Chat
+  alias AgenticUi.Chat.Schemas.SurfaceSnapshot
   alias AgenticUi.LLM
 
   @impl true
@@ -18,6 +19,8 @@ defmodule AgenticUiWeb.ChatChannel do
     with {:uuid, {:ok, _}} <- {:uuid, Ecto.UUID.cast(conversation_id)},
          %_{} = conv <- Chat.get_conversation(conversation_id),
          {:ok, agent_pid} <- ensure_agent(conversation_id) do
+      :ok = Phoenix.PubSub.subscribe(AgenticUi.PubSub, "chat:" <> conversation_id)
+
       socket =
         socket
         |> assign(:conversation_id, conversation_id)
@@ -46,12 +49,19 @@ defmodule AgenticUiWeb.ChatChannel do
 
   @impl true
   def handle_info(:after_join, socket) do
-    push(socket, "history", %{messages: Chat.list_messages(socket.assigns.conversation_id)})
+    cid = socket.assigns.conversation_id
+    push(socket, "history", %{messages: Chat.list_messages(cid)})
+    push(socket, "a2ui_replay", %{surfaces: replay_payload(cid)})
     {:noreply, socket}
   end
 
   def handle_info({:assistant_token, delta}, socket) do
     push(socket, "assistant_token", %{delta: delta})
+    {:noreply, socket}
+  end
+
+  def handle_info({:a2ui_envelope, envelope}, socket) do
+    push(socket, "a2ui_envelope", envelope)
     {:noreply, socket}
   end
 
@@ -147,4 +157,17 @@ defmodule AgenticUiWeb.ChatChannel do
     do: Logger.debug("[A2UI tool] completed #{name} data=#{inspect(data)}")
 
   defp log_tool_event(_), do: :ok
+
+  defp replay_payload(conversation_id) do
+    conversation_id
+    |> Chat.list_surface_snapshots()
+    |> Enum.map(fn %SurfaceSnapshot{} = s ->
+      %{
+        surface_id: s.surface_id,
+        envelope_log: s.envelope_log || [],
+        data_model: s.data_model || %{},
+        updated_at: s.updated_at
+      }
+    end)
+  end
 end
