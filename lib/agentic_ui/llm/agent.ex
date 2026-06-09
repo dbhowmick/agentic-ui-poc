@@ -17,9 +17,20 @@ defmodule AgenticUi.LLM.Agent do
 
   @catalog_path Path.join(:code.priv_dir(:agentic_ui), "a2ui/catalog.json")
   @external_resource @catalog_path
-  @catalog_json File.read!(@catalog_path)
+  # Strip every `description` field from the catalog before embedding it in
+  # the system prompt — the model doesn't need them to render correctly and
+  # they account for ~25% of the catalog's JSON mass. The full descriptive
+  # catalog is still available at runtime via `AgenticUi.A2UI.Catalog.get/0`
+  # for the validator's catalog-pass.
+  @catalog_json @catalog_path |> File.read!() |> AgenticUi.A2UI.Catalog.slim_json()
   @system_prompt AgenticUi.LLM.SystemPrompt.build(@catalog_json)
 
+  # Enable Anthropic prompt caching so the ~20K-token system prompt (the
+  # embedded MeldUI catalog) is paid for once per cache TTL window (~5m by
+  # default) instead of every turn. `req_llm`'s Anthropic provider injects the
+  # `cache_control` marker on the system message when this flag is set; the
+  # API returns `cache_creation_input_tokens` on the write and
+  # `cache_read_input_tokens` on subsequent hits (× 0.1 of normal cost).
   use Jido.AI.Agent,
     name: "a2ui_agent",
     model: :default,
@@ -29,7 +40,8 @@ defmodule AgenticUi.LLM.Agent do
       AgenticUi.LLM.Tools.UpdateDataModel,
       AgenticUi.LLM.Tools.DeleteSurface
     ],
-    system_prompt: @system_prompt
+    system_prompt: @system_prompt,
+    llm_opts: [provider_options: [anthropic_prompt_cache: true]]
 
   alias AgenticUi.Chat.Schemas.Message
   alias Jido.AI.Context

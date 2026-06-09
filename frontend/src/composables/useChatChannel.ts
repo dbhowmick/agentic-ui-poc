@@ -74,6 +74,14 @@ export function useChatChannel(conversationId: string): UseChatChannel {
 
   channel.on('a2ui_envelope', (envelope: A2UIEnvelope) => {
     envelopes.value = [...envelopes.value, envelope]
+    // Progressive rendering: when a `createSurface` arrives mid-turn, attach
+    // its surfaceId to the currently-streaming assistant placeholder so the
+    // inline panel mounts immediately. If no placeholder exists yet (the
+    // create_surface tool fired before the first text delta), create one
+    // with empty content. The persisted row at `assistant_done` will replace
+    // the placeholder and carry the canonical `surface_ids` list.
+    const sid = envelope.createSurface?.surfaceId
+    if (sid) attachSurfaceIdToStreamingMessage(sid)
   })
 
   channel
@@ -87,6 +95,37 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     .receive('timeout', () => {
       error.value = 'channel_join_timeout'
     })
+
+  function attachSurfaceIdToStreamingMessage(surfaceId: string) {
+    const list = messages.value ?? []
+    const id = streamingId.value
+    const idx = id ? list.findIndex((m) => m.id === id) : -1
+    const target = idx >= 0 ? list[idx] : undefined
+
+    if (!target) {
+      // No streaming message yet — spawn an empty placeholder so the panel
+      // has a host to sit under.
+      const newId = tempId('asst')
+      streamingId.value = newId
+      const placeholder: Message = {
+        id: newId,
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: '',
+        tool_calls: [],
+        tool_results: [],
+        surface_ids: [surfaceId],
+        inserted_at: new Date().toISOString(),
+      }
+      messages.value = [...list, placeholder]
+      return
+    }
+
+    const existing = target.surface_ids ?? []
+    if (existing.includes(surfaceId)) return
+    const next: Message = { ...target, surface_ids: [...existing, surfaceId] }
+    messages.value = [...list.slice(0, idx), next, ...list.slice(idx + 1)]
+  }
 
   function appendDelta(delta: string) {
     const list = messages.value ?? []

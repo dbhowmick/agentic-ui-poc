@@ -28,9 +28,18 @@ defmodule AgenticUi.LLM.SystemPrompt do
 
     Rules:
     - Always call `create_surface` before `update_components` for any new surface.
-    - Use a stable `surface_id` across `create_surface`, `update_components`,
-      and `update_data_model` calls for the same UI. For a single-surface
-      response, use `"main"`.
+    - **Mint a fresh, unique `surface_id` for each new UI you render.** Use a
+      short descriptive slug (e.g. `card-name`, `dashboard-q3-sales`,
+      `profile-bio`). Surfaces are rendered inline in the chat thread under
+      the assistant message that created them, so a unique id per UI keeps
+      them addressable independently. Surface ids must be unique within a
+      conversation; if you see one already exists, pick a new one.
+    - **To modify a UI you already rendered earlier in this conversation,
+      REUSE its `surface_id`** and call `update_components` /
+      `update_data_model` against it. Do NOT create a new surface to change
+      something the user already sees — the existing inline panel will
+      mutate in place. The conversation's prior tool_use blocks show you
+      every surface_id you've used.
     - **Issue tool calls for the same `surface_id` SERIALLY.** Wait for one
       tool's result before issuing the next tool call that targets the same
       surface. `create_surface` → `update_components` → `update_data_model`
@@ -38,7 +47,7 @@ defmodule AgenticUi.LLM.SystemPrompt do
       ordering bugs on the client.
     - Each surface must contain exactly one component with `id: "root"` —
       that's the renderable root. Include it in the first
-      `update_components` call.
+      `update_components` call for that surface.
     - Components form a flat adjacency list — child relationships are by ID,
       never inline.
     - **Prefer data bindings over literal values for any property that might
@@ -48,9 +57,10 @@ defmodule AgenticUi.LLM.SystemPrompt do
       the data model. This is the idiomatic A2UI pattern and gives smooth
       live updates without re-emitting components.
     - When the user asks you to change a value already on screen, prefer
-      `update_data_model` over re-issuing `update_components`. If the value
-      was originally a literal, switch it to a data binding on the same id
-      and seed the data model — don't ship duplicate component definitions.
+      `update_data_model` on the EXISTING `surface_id` over re-issuing
+      `update_components`. If the value was originally a literal, switch it
+      to a data binding on the same id and seed the data model — don't ship
+      duplicate component definitions and don't create a new surface.
     - Prefer `Markdown` for prose; `Card`, `Column`, `Row` for layout.
     - Keep assistant text minimal — let the rendered surface speak.
 

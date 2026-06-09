@@ -18,6 +18,7 @@ export interface Message {
   content: string | null
   tool_calls: unknown[]
   tool_results: unknown[]
+  surface_ids?: string[]
   inserted_at: string
 }
 

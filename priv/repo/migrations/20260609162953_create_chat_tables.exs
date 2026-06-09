@@ -6,7 +6,7 @@ defmodule AgenticUi.Repo.Migrations.CreateChatTables do
       add :id, :binary_id, primary_key: true
       add :title, :string
       add :mode, :string, null: false, default: "tool_calls"
-      add :model, :string, null: false, default: "claude-sonnet-4-5-20250929"
+      add :model, :string, null: false, default: "claude-haiku-4-5-20251001"
       timestamps(type: :utc_datetime_usec)
     end
 

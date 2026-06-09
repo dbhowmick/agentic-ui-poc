@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { IncremarkContent } from '@incremark/vue'
+import { A2UISurface } from '@meldui/a2ui/vue'
 import type { Message } from '@/types/chat'
 
 const props = defineProps<{
@@ -55,15 +56,24 @@ onMounted(scrollToBottom)
         >
           <p class="whitespace-pre-wrap text-sm leading-relaxed">{{ msg.content }}</p>
         </div>
-        <div
-          v-else-if="msg.role === 'assistant'"
-          class="markdown-body self-start max-w-[85%] text-sm leading-relaxed text-foreground"
-        >
-          <IncremarkContent
-            :content="msg.content ?? ''"
-            :is-finished="!isLastAssistant(msg)"
-          />
-        </div>
+        <template v-else-if="msg.role === 'assistant'">
+          <div
+            v-if="msg.content"
+            class="markdown-body self-start max-w-[85%] text-sm leading-relaxed text-foreground"
+          >
+            <IncremarkContent
+              :content="msg.content ?? ''"
+              :is-finished="!isLastAssistant(msg)"
+            />
+          </div>
+          <div
+            v-for="sid in msg.surface_ids ?? []"
+            :key="`${msg.id}/${sid}`"
+            class="self-start w-full"
+          >
+            <A2UISurface :surface-id="sid" />
+          </div>
+        </template>
       </template>
 
       <div v-if="streaming && messages.at(-1)?.role !== 'assistant'"

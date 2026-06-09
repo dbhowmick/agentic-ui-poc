@@ -1,62 +1,72 @@
 defmodule AgenticUi.A2UI.Catalog do
   @moduledoc """
-  Loads the MeldUI A2UI component catalog into memory at boot.
+  Loads the vendored MeldUI A2UI component catalog into memory at boot.
 
-  At `start_link/1` we try to fetch the published catalog from
-  `https://meldui.dipayanb.com/a2ui/v1/catalog.json`. On any failure (timeout,
-  non-200, network down) we log a warning and fall back to the vendored snapshot
-  at `priv/a2ui/catalog.json`.
+  The canonical source is `priv/a2ui/catalog.json` — bumped manually when a
+  new MeldUI catalog ships, never fetched over the network at runtime. Cached
+  via `Agent` because the validator reads it on every tool call.
 
-  Backed by an `Agent` — the catalog is set once at boot and read at most once
-  per `Jido.AgentServer` start, so a single-process Agent is plenty.
+  Two public catalog views:
+
+    * `get/0` — the full catalog map (with descriptions, defaults, etc.).
+      Used by `AgenticUi.A2UI.Validator` for the catalog semantic pass.
+    * `slim_json/1` / `strip_descriptions/1` — pure helpers that drop every
+      `description` field anywhere in the structure. Used by the LLM agent
+      to build a leaner system prompt: descriptions are ~25% of the catalog
+      JSON's mass and the model doesn't need them to render correctly.
   """
   use Agent
   require Logger
 
-  @catalog_url "https://meldui.dipayanb.com/a2ui/v1/catalog.json"
-  @fetch_timeout_ms 5_000
+  @vendored_path Path.join(:code.priv_dir(:agentic_ui), "a2ui/catalog.json")
 
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(_opts) do
-    Agent.start_link(&load/0, name: __MODULE__)
+    Agent.start_link(&load_vendored!/0, name: __MODULE__)
   end
 
   @doc "Returns the cached catalog map."
   @spec get() :: map()
   def get, do: Agent.get(__MODULE__, & &1)
 
-  @doc "Refetches the catalog from the upstream URL."
+  @doc "Force a reload from disk. Useful in IEx after bumping `priv/a2ui/catalog.json`."
   @spec refresh() :: :ok
-  def refresh, do: Agent.update(__MODULE__, fn _ -> load() end)
+  def refresh, do: Agent.update(__MODULE__, fn _ -> load_vendored!() end)
 
-  defp load do
-    case fetch_remote() do
-      {:ok, catalog} ->
-        Logger.info(
-          "[A2UI catalog] loaded from #{@catalog_url} (#{map_size(catalog)} top-level keys)"
-        )
-
-        catalog
-
-      {:error, reason} ->
-        Logger.warning(
-          "[A2UI catalog] remote fetch failed (#{inspect(reason)}); using vendored snapshot"
-        )
-
-        load_vendored!()
-    end
+  @doc """
+  Recursively strip every `"description"` key from a catalog map. Pure;
+  callable at compile time (the LLM agent calls this on the catalog before
+  embedding it in the system prompt).
+  """
+  @spec strip_descriptions(term()) :: term()
+  def strip_descriptions(map) when is_map(map) do
+    map
+    |> Map.delete("description")
+    |> Map.new(fn {k, v} -> {k, strip_descriptions(v)} end)
   end
 
-  defp fetch_remote do
-    case Req.get(@catalog_url, receive_timeout: @fetch_timeout_ms, retry: false) do
-      {:ok, %Req.Response{status: 200, body: body}} when is_map(body) -> {:ok, body}
-      {:ok, %Req.Response{status: status}} -> {:error, {:http_status, status}}
-      {:error, exception} -> {:error, exception}
-    end
+  def strip_descriptions(list) when is_list(list), do: Enum.map(list, &strip_descriptions/1)
+  def strip_descriptions(other), do: other
+
+  @doc """
+  Decode the given catalog JSON, strip descriptions, re-encode. Convenience
+  for the agent's compile-time pipeline.
+  """
+  @spec slim_json(String.t()) :: String.t()
+  def slim_json(catalog_json) when is_binary(catalog_json) do
+    catalog_json
+    |> Jason.decode!()
+    |> strip_descriptions()
+    |> Jason.encode!()
   end
 
   defp load_vendored! do
-    path = Path.join(:code.priv_dir(:agentic_ui), "a2ui/catalog.json")
-    path |> File.read!() |> Jason.decode!()
+    catalog = @vendored_path |> File.read!() |> Jason.decode!()
+
+    Logger.info(
+      "[A2UI catalog] loaded vendored snapshot (#{map_size(catalog)} top-level keys)"
+    )
+
+    catalog
   end
 end

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { toast } from '@meldui/vue'
 import { IconArrowLeft } from '@meldui/tabler-vue'
+import { provideA2UI } from '@meldui/a2ui/vue'
 import ChatMessageList from '@/components/ChatMessageList.vue'
 import ChatComposer from '@/components/ChatComposer.vue'
-import A2UISurfacePanel from '@/components/A2UISurfacePanel.vue'
 import { useChatChannel } from '@/composables/useChatChannel'
 import type { A2UIEnvelope } from '@/types/chat'
 
@@ -13,16 +13,43 @@ const props = defineProps<{ id: string }>()
 
 const { messages, streaming, error, envelopes, send, sendAction } = useChatChannel(props.id)
 
+// One `MessageProcessor` for the whole conversation — it holds every surface
+// the LLM creates. Each `<A2UISurface :surface-id="X">` mounted inside the
+// message list injects this processor and subscribes to surface lifecycle
+// events for its own id. The renderer handles updates idiomatically:
+// `updateDataModel` patches re-evaluate `DataBinding`-typed props via
+// `GenericBinder`'s signal subscriptions; the system prompt steers the LLM
+// to use bindings + `update_data_model` for any value that may change.
+const { processor } = provideA2UI({
+  onAction: (action: unknown) => sendAction(action),
+})
+
+// Dispatch every envelope to the processor exactly once. Object identity in a
+// `WeakSet` is the dedup key — both the live `a2ui_envelope` push and the
+// `a2ui_replay` array refill produce fresh deserialised objects, so each
+// envelope reference is fed in at most once. Survives watcher re-fires and
+// replay-then-live ordering without a fragile length cursor.
+const processed = new WeakSet<object>()
+watch(
+  envelopes,
+  (envs) => {
+    if (!envs) return
+    const pending: A2UIEnvelope[] = []
+    for (const env of envs) {
+      if (processed.has(env)) continue
+      processed.add(env)
+      pending.push(env)
+    }
+    if (pending.length > 0) {
+      processor.processMessages(pending as Parameters<typeof processor.processMessages>[0])
+    }
+  },
+  { immediate: true },
+)
+
 watch(error, (msg) => {
   if (msg) toast.error(msg)
 })
-
-// Bumped on every envelope log change so `<A2UISurfacePanel>` remounts with a
-// fresh `MessageProcessor` and replays the full log. See A2UISurfacePanel.vue
-// for the upstream bugs this works around.
-const surfacePanelKey = computed(() => envelopes.value?.length ?? 0)
-
-const envelopeLog = computed<A2UIEnvelope[]>(() => envelopes.value ?? [])
 
 function shortId(id: string) {
   return id.slice(0, 8)
@@ -45,22 +72,8 @@ function shortId(id: string) {
       </div>
     </header>
 
-    <div class="flex min-h-0 flex-1">
-      <div class="flex flex-1 flex-col">
-        <ChatMessageList :messages="messages ?? []" :streaming="streaming ?? false" />
-        <ChatComposer :disabled="streaming ?? false" @submit="send" />
-      </div>
-      <aside class="hidden w-[420px] flex-col border-l bg-card lg:flex">
-        <div class="border-b px-4 py-3 text-sm font-medium">Surface</div>
-        <div class="flex-1 overflow-auto p-4">
-          <A2UISurfacePanel
-            :key="surfacePanelKey"
-            :envelopes="envelopeLog"
-            surface-id="main"
-            :on-action="sendAction"
-          />
-        </div>
-      </aside>
-    </div>
+    <ChatMessageList :messages="messages ?? []" :streaming="streaming ?? false" />
+
+    <ChatComposer :disabled="streaming ?? false" @submit="send" />
   </main>
 </template>

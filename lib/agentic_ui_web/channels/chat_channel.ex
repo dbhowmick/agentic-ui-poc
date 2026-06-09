@@ -103,14 +103,15 @@ defmodule AgenticUiWeb.ChatChannel do
 
     case LLM.Agent.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
       {:ok, %{request: request, events: events}} ->
-        assistant_text = relay_stream(events, channel_pid)
+        {assistant_text, surface_ids} = relay_stream(events, channel_pid)
         _ = LLM.Agent.await(request, timeout: 60_000)
 
         _ =
           Chat.insert_message!(%{
             conversation_id: cid,
             role: "assistant",
-            content: assistant_text
+            content: assistant_text,
+            surface_ids: MapSet.to_list(surface_ids)
           })
 
         send(channel_pid, {:assistant_done, cid})
@@ -120,25 +121,51 @@ defmodule AgenticUiWeb.ChatChannel do
     end
   end
 
-  # Iterate the Jido.AI runtime event stream and forward content deltas to the
-  # channel. Returns the accumulated assistant text. See
-  # `Jido.AI.Runtime.Event` for the canonical envelope; per-turn we care about
-  # `:llm_delta` (chunk_type :content) for streaming text. Thinking deltas
-  # are dropped here.
+  # Iterate the Jido.AI runtime event stream. Returns `{accumulated_text,
+  # surface_ids_created}` where `surface_ids_created` is the MapSet of surface
+  # IDs that this turn's `create_surface` tool calls successfully created.
+  # `update_components` / `update_data_model` don't count — only the originating
+  # message of a surface owns the inline panel.
   defp relay_stream(events, channel_pid) do
-    Enum.reduce(events, "", fn event, acc ->
+    Enum.reduce(events, {"", MapSet.new()}, fn event, {text, sids} ->
       log_tool_event(event)
+
+      sids =
+        case extract_created_surface(event) do
+          {:ok, sid} -> MapSet.put(sids, sid)
+          :none -> sids
+        end
 
       case extract_delta(event) do
         {:content, delta} ->
           send(channel_pid, {:assistant_token, delta})
-          acc <> delta
+          {text <> delta, sids}
 
         _other ->
-          acc
+          {text, sids}
       end
     end)
   end
+
+  # A successful `create_surface` tool completion looks like:
+  #   %{kind: :tool_completed, tool_name: "create_surface",
+  #     data: %{result: {:ok, %{surface_id: sid, ...}, _effects},
+  #             tool_name: "create_surface", ...}}
+  # Match both the 3-tuple `{status, value, effects}` (Jido canonical) and the
+  # 2-tuple `{status, value}` for defensiveness against future shape drift.
+  defp extract_created_surface(%{
+         kind: :tool_completed,
+         tool_name: "create_surface",
+         data: %{result: result}
+       }) do
+    case result do
+      {:ok, %{surface_id: sid}, _effects} when is_binary(sid) -> {:ok, sid}
+      {:ok, %{surface_id: sid}} when is_binary(sid) -> {:ok, sid}
+      _ -> :none
+    end
+  end
+
+  defp extract_created_surface(_), do: :none
 
   defp extract_delta(%{kind: :llm_delta, data: %{delta: delta} = data})
        when is_binary(delta) and delta != "" do
