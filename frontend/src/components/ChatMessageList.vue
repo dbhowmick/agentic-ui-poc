@@ -2,7 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { IncremarkContent } from '@incremark/vue'
 import { A2UISurface } from '@meldui/a2ui/vue'
-import type { Message } from '@/types/chat'
+import { IconHandClick } from '@meldui/tabler-vue'
+import type { A2uiClientAction, Message } from '@/types/chat'
 
 const props = defineProps<{
   messages: Message[]
@@ -16,6 +17,27 @@ const lastMessage = computed(() => props.messages.at(-1) ?? null)
 
 function isLastAssistant(msg: Message) {
   return props.streaming && msg.id === lastMessage.value?.id && msg.role === 'assistant'
+}
+
+// Messages synthesised from a client-side A2UI action are persisted as
+// `role: "user"` with content prefixed by `[a2ui_action]` and the structured
+// payload stuffed into `tool_results[0]` (see `AgenticUi.A2UI.ClientAction`).
+// Render them as a compact chip rather than raw synthesised text so the
+// thread reads naturally.
+function asActionPayload(msg: Message): A2uiClientAction | null {
+  if (msg.role !== 'user') return null
+  if (typeof msg.content !== 'string' || !msg.content.startsWith('[a2ui_action]')) return null
+  const first = msg.tool_results?.[0]
+  if (!first || typeof first !== 'object') return null
+  const a = first as Record<string, unknown>
+  if (
+    typeof a.name !== 'string' ||
+    typeof a.surfaceId !== 'string' ||
+    typeof a.sourceComponentId !== 'string'
+  ) {
+    return null
+  }
+  return a as unknown as A2uiClientAction
 }
 
 function onScroll() {
@@ -50,12 +72,23 @@ onMounted(scrollToBottom)
   >
     <div class="mx-auto flex max-w-2xl flex-col gap-6">
       <template v-for="msg in messages" :key="msg.id">
-        <div
-          v-if="msg.role === 'user'"
-          class="self-end max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-primary-foreground"
-        >
-          <p class="whitespace-pre-wrap text-sm leading-relaxed">{{ msg.content }}</p>
-        </div>
+        <template v-if="msg.role === 'user'">
+          <div
+            v-if="asActionPayload(msg)"
+            class="self-end inline-flex items-center gap-2 rounded-full border bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground"
+            :title="`surface=${asActionPayload(msg)!.surfaceId}\nsource=${asActionPayload(msg)!.sourceComponentId}`"
+          >
+            <IconHandClick class="size-3.5" />
+            <span class="font-medium text-foreground">{{ asActionPayload(msg)!.name }}</span>
+            <span class="font-mono">{{ asActionPayload(msg)!.sourceComponentId }}</span>
+          </div>
+          <div
+            v-else
+            class="self-end max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-primary-foreground"
+          >
+            <p class="whitespace-pre-wrap text-sm leading-relaxed">{{ msg.content }}</p>
+          </div>
+        </template>
         <template v-else-if="msg.role === 'assistant'">
           <div
             v-if="msg.content"

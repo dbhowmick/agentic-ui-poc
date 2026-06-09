@@ -10,6 +10,7 @@ defmodule AgenticUiWeb.ChatChannel do
   use AgenticUiWeb, :channel
   require Logger
 
+  alias AgenticUi.A2UI.ClientAction
   alias AgenticUi.Chat
   alias AgenticUi.Chat.Schemas.SurfaceSnapshot
   alias AgenticUi.LLM
@@ -85,10 +86,24 @@ defmodule AgenticUiWeb.ChatChannel do
     {:reply, :ok, socket}
   end
 
-  # Phase 0 stubs — wired in later phases.
+  # Client → server A2UI action (user clicks a button, submits a form, etc.).
+  # The renderer (`@a2ui/web_core` via `@meldui/a2ui/vue`) emits the standard
+  # v0.9 `A2uiClientAction` shape. We synthesise a user-role turn from it and
+  # feed it through the same `ask_stream` pipeline as a typed user_message,
+  # closing the round-trip.
   def handle_in("a2ui_action", payload, socket) do
-    Logger.info("a2ui_action (stub): #{inspect(payload)}")
-    {:reply, :ok, socket}
+    case ClientAction.cast(payload) do
+      {:ok, %ClientAction{} = action} ->
+        parent = self()
+        %{conversation_id: cid, agent_pid: agent_pid} = socket.assigns
+        Task.start(fn -> run_action_turn(parent, cid, agent_pid, action) end)
+        {:reply, :ok, socket}
+
+      {:error, reason} ->
+        Logger.warning("a2ui_action rejected: #{reason} payload=#{inspect(payload)}")
+        push(socket, "error", %{message: reason})
+        {:reply, {:error, %{reason: reason}}, socket}
+    end
   end
 
   def handle_in("a2ui_error", payload, socket) do
@@ -100,6 +115,41 @@ defmodule AgenticUiWeb.ChatChannel do
 
   defp run_turn(channel_pid, cid, agent_pid, content) do
     _ = Chat.insert_message!(%{conversation_id: cid, role: "user", content: content})
+
+    case LLM.Agent.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
+      {:ok, %{request: request, events: events}} ->
+        {assistant_text, surface_ids} = relay_stream(events, channel_pid)
+        _ = LLM.Agent.await(request, timeout: 60_000)
+
+        _ =
+          Chat.insert_message!(%{
+            conversation_id: cid,
+            role: "assistant",
+            content: assistant_text,
+            surface_ids: MapSet.to_list(surface_ids)
+          })
+
+        send(channel_pid, {:assistant_done, cid})
+
+      {:error, reason} ->
+        send(channel_pid, {:llm_error, reason})
+    end
+  end
+
+  # Same orchestration as `run_turn/4`, but the incoming content is synthesised
+  # from a client-side A2UI action. The user row carries the structured action
+  # payload in `tool_results` so the frontend can render it distinctly without
+  # re-parsing the synthesised text.
+  defp run_action_turn(channel_pid, cid, agent_pid, %ClientAction{} = action) do
+    content = ClientAction.to_user_content(action)
+
+    _ =
+      Chat.insert_message!(%{
+        conversation_id: cid,
+        role: "user",
+        content: content,
+        tool_results: [ClientAction.to_payload(action)]
+      })
 
     case LLM.Agent.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
       {:ok, %{request: request, events: events}} ->

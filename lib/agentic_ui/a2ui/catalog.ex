@@ -63,9 +63,7 @@ defmodule AgenticUi.A2UI.Catalog do
   defp load_vendored! do
     catalog = @vendored_path |> File.read!() |> Jason.decode!()
 
-    Logger.info(
-      "[A2UI catalog] loaded vendored snapshot (#{map_size(catalog)} top-level keys)"
-    )
+    Logger.info("[A2UI catalog] loaded vendored snapshot (#{map_size(catalog)} top-level keys)")
 
     catalog
   end

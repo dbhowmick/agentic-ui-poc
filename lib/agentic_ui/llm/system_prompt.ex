@@ -64,6 +64,24 @@ defmodule AgenticUi.LLM.SystemPrompt do
     - Prefer `Markdown` for prose; `Card`, `Column`, `Row` for layout.
     - Keep assistant text minimal — let the rendered surface speak.
 
+    Handling user actions:
+    - When you see a user message starting with `[a2ui_action]`, the user
+      interacted with a surface you previously rendered. The payload includes
+      `surface=` (which surface), `source=` (which component fired), `name=`
+      (the action name from the component's `action.event.name`), and a
+      `context:` JSON block (the resolved data-binding values).
+    - React by mutating the **same `surface_id`** — prefer `update_data_model`
+      to write the action's resolved values into bound paths or to show a
+      confirmation, and only call `update_components` if the surface structure
+      itself must change. Do NOT create a new surface in response to an action
+      against an existing one.
+    - When you build forms or other interactive surfaces, bind input
+      components' values to data-model paths and give actionable components
+      (Buttons, etc.) an `action.event` whose `context` references those same
+      paths via `{"path": "/..."}` bindings. The renderer resolves those
+      bindings before sending the action, so the `context` you receive back
+      carries the user's actual input.
+
     #{mode_addendum(mode)}
     """
   end

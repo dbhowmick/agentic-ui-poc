@@ -1,7 +1,7 @@
 import { onBeforeUnmount, ref, shallowRef } from 'vue'
 import type { Channel } from 'phoenix'
 import { getSocket } from '@/lib/socket'
-import type { A2UIEnvelope, Message, SurfaceReplay } from '@/types/chat'
+import type { A2UIEnvelope, A2uiClientAction, Message, SurfaceReplay } from '@/types/chat'
 
 interface HistoryPayload {
   messages: Message[]
@@ -26,7 +26,7 @@ export interface UseChatChannel {
   error: ReturnType<typeof ref<string | null>>
   envelopes: ReturnType<typeof ref<A2UIEnvelope[]>>
   send: (content: string) => void
-  sendAction: (action: unknown) => void
+  sendAction: (action: A2uiClientAction) => void
 }
 
 function tempId(prefix: string) {
@@ -174,8 +174,36 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     })
   }
 
-  function sendAction(action: unknown) {
-    channel.push('a2ui_action', action as object)
+  function sendAction(action: A2uiClientAction) {
+    // Drop actions issued while a turn is in flight — the LLM is already
+    // working on something for this conversation and accepting another
+    // user-side turn mid-stream would let the model race itself.
+    if (streaming.value) {
+      error.value = 'Please wait for the current reply before interacting again.'
+      return
+    }
+    error.value = null
+    // Mirror `send/1`'s optimistic-bubble pattern with an action chip. The
+    // backend persists this same shape (role=user, content prefixed by
+    // `[a2ui_action]`, action payload at tool_results[0]) so refresh from
+    // history will produce an identical-looking row.
+    const optimisticAction: Message = {
+      id: tempId('action'),
+      conversation_id: conversationId,
+      role: 'user',
+      content: `[a2ui_action] surface=${action.surfaceId} source=${action.sourceComponentId} name=${action.name}`,
+      tool_calls: [],
+      tool_results: [action as unknown as Record<string, unknown>],
+      inserted_at: new Date().toISOString(),
+    }
+    messages.value = [...(messages.value ?? []), optimisticAction]
+    streaming.value = true
+    streamingId.value = null
+    channel.push('a2ui_action', action as unknown as object).receive('error', (err) => {
+      streaming.value = false
+      streamingId.value = null
+      error.value = typeof err === 'string' ? err : 'action_failed'
+    })
   }
 
   onBeforeUnmount(() => {

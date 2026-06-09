@@ -7,7 +7,7 @@ import { provideA2UI } from '@meldui/a2ui/vue'
 import ChatMessageList from '@/components/ChatMessageList.vue'
 import ChatComposer from '@/components/ChatComposer.vue'
 import { useChatChannel } from '@/composables/useChatChannel'
-import type { A2UIEnvelope } from '@/types/chat'
+import type { A2UIEnvelope, A2uiClientAction } from '@/types/chat'
 
 const props = defineProps<{ id: string }>()
 
@@ -21,7 +21,7 @@ const { messages, streaming, error, envelopes, send, sendAction } = useChatChann
 // `GenericBinder`'s signal subscriptions; the system prompt steers the LLM
 // to use bindings + `update_data_model` for any value that may change.
 const { processor } = provideA2UI({
-  onAction: (action: unknown) => sendAction(action),
+  onAction: (action) => sendAction(action as A2uiClientAction),
 })
 
 // Dispatch every envelope to the processor exactly once. Object identity in a

@@ -40,3 +40,14 @@ export interface SurfaceReplay {
   data_model: Record<string, unknown>
   updated_at: string
 }
+
+// A2UI v0.9 client→server action — emitted by @a2ui/web_core when a user
+// triggers a component's `action.event` (button click, form submit, etc.).
+// Mirrors the zod schema in @a2ui/web_core/v0_9/schema/client-to-server.js.
+export interface A2uiClientAction {
+  name: string
+  surfaceId: string
+  sourceComponentId: string
+  timestamp: string
+  context: Record<string, unknown>
+}
