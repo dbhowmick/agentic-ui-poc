@@ -77,5 +77,54 @@ defmodule AgenticUi.A2UI.ValidatorTest do
 
       assert Validator.validate(env, known_component_ids: MapSet.new(["old"])) == :ok
     end
+
+    # Markdown.content is a DynamicString (literal text or {path}), NOT a
+    # ComponentId. The prior heuristic treated every `content` field as a
+    # child ref and rejected envelopes like this one.
+    test "Markdown.content with a literal string is NOT a child ref" do
+      env =
+        Envelope.from_tool(:update_components, %{
+          surface_id: "main",
+          components: [
+            %{"id" => "root", "component" => "Card", "child" => "p"},
+            %{"id" => "p", "component" => "Markdown", "content" => "hello world"}
+          ]
+        })
+
+      assert Validator.validate(env) == :ok
+    end
+
+    test "Markdown.content with a data binding is NOT a child ref" do
+      env =
+        Envelope.from_tool(:update_components, %{
+          surface_id: "main",
+          components: [
+            %{"id" => "root", "component" => "Card", "child" => "p"},
+            %{"id" => "p", "component" => "Markdown", "content" => %{"path" => "/body"}}
+          ]
+        })
+
+      assert Validator.validate(env) == :ok
+    end
+
+    test "Modal.content IS a child ref (caught when dangling)" do
+      env =
+        Envelope.from_tool(:update_components, %{
+          surface_id: "main",
+          components: [
+            %{
+              "id" => "m",
+              "component" => "Modal",
+              "trigger" => "btn",
+              "content" => "ghost"
+            },
+            %{"id" => "btn", "component" => "Button", "child" => "lbl"},
+            %{"id" => "lbl", "component" => "Text", "text" => "open"}
+          ]
+        })
+
+      assert {:error, msg} = Validator.validate(env)
+      assert msg =~ "ghost"
+    end
   end
 end

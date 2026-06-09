@@ -60,6 +60,55 @@ defmodule AgenticUi.A2UI.Catalog do
     |> Jason.encode!()
   end
 
+  @doc """
+  Per-component map of "prop names that carry child component IDs".
+
+  Derived by walking each component's `allOf` leaf-object `properties` and
+  picking the props whose schema points at A2UI's `ComponentId` definition
+  (either directly, or as an array `items` ref).
+
+  Used by `AgenticUi.A2UI.Validator` to distinguish a real child reference
+  (e.g. `Card.child`, `Column.children`) from a literal-string prop that
+  happens to share a name with one (e.g. `Markdown.content`, where `content`
+  is a `DynamicString`, not a `ComponentId`).
+  """
+  @spec child_field_index() :: %{String.t() => MapSet.t(String.t())}
+  def child_field_index, do: child_field_index(get())
+
+  @spec child_field_index(map()) :: %{String.t() => MapSet.t(String.t())}
+  def child_field_index(catalog) when is_map(catalog) do
+    catalog
+    |> Map.get("components", %{})
+    |> Map.new(fn {name, defn} -> {name, leaf_child_fields(defn)} end)
+  end
+
+  defp leaf_child_fields(%{"allOf" => items}) when is_list(items) do
+    items
+    |> Enum.find(fn item -> is_map(item) and not Map.has_key?(item, "$ref") end)
+    |> case do
+      nil -> MapSet.new()
+      leaf -> leaf |> Map.get("properties", %{}) |> child_props()
+    end
+  end
+
+  defp leaf_child_fields(_), do: MapSet.new()
+
+  defp child_props(props) do
+    props
+    |> Enum.flat_map(fn {name, schema} ->
+      if component_id_field?(schema), do: [name], else: []
+    end)
+    |> MapSet.new()
+  end
+
+  defp component_id_field?(%{"$ref" => ref}) when is_binary(ref),
+    do: String.contains?(ref, "ComponentId")
+
+  defp component_id_field?(%{"type" => "array", "items" => items}),
+    do: component_id_field?(items)
+
+  defp component_id_field?(_), do: false
+
   defp load_vendored! do
     catalog = @vendored_path |> File.read!() |> Jason.decode!()
 

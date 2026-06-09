@@ -1,22 +1,25 @@
 defmodule AgenticUi.LLM.Tools.Emit do
   @moduledoc """
-  Shared pipeline used by the four A2UI envelope tools.
+  Shared envelope pipeline used by both emission modes.
 
-  Each tool's `run/2` calls `emit/3` with its tool-name atom + parsed args +
-  the `Jido.AI.Agent.ask_stream/3` `tool_context` map (which carries the
-  conversation ID). The pipeline:
+  In `:tool_calls` mode each of the four `Jido.Action` tools' `run/2` calls
+  `emit/3` with its tool-name atom + parsed args + the
+  `Jido.AI.Agent.ask_stream/3` `tool_context` map (which carries the
+  conversation ID). In `:streamed_json` mode the channel's per-turn relay
+  hands already-built envelopes parsed from the assistant's JSONL stream to
+  `from_envelope/2`. Both routes converge on `do_emit/4`:
 
-  1. Build the canonical A2UI v0.9 wire envelope.
-  2. (For `:update_components`) Load the surface's known component IDs from
+  1. (For `:update_components`) Load the surface's known component IDs from
      the persisted snapshot so the validator can resolve cross-envelope refs.
-  3. Validate (schema + catalog).
-  4. Persist (`Chat.apply_envelope/2`) — DB before broadcast, so the client
+  2. Validate (schema + catalog).
+  3. Persist (`Chat.apply_envelope/2`) — DB before broadcast, so the client
      never renders an envelope the DB didn't record.
-  5. Broadcast on `chat:<conversation_id>` via PubSub.
-  6. Return `{:ok, %{acknowledged: true, surface_id: ...}}` for the model.
+  4. Broadcast on `chat:<conversation_id>` via PubSub.
+  5. Return `{:ok, %{acknowledged: true, surface_id: ...}}`.
 
-  On validation failure returns `{:error, "schema: ..."| "catalog: ..."}` so
-  the LLM sees a recoverable tool result and self-corrects in the next step.
+  On validation failure returns `{:error, "schema: ..." | "catalog: ..."}` —
+  shaped for direct consumption as either a tool result the LLM sees or an
+  error event the channel pushes to the client.
   """
 
   require Logger
@@ -35,8 +38,35 @@ defmodule AgenticUi.LLM.Tools.Emit do
   @spec emit(tool_name(), map(), map()) :: {:ok, map()} | {:error, String.t()}
   def emit(tool_name, args, %{conversation_id: cid}) when is_binary(cid) do
     envelope = Envelope.from_tool(tool_name, args)
-    surface_id = Envelope.surface_id(envelope)
+    do_emit(tool_name, envelope, Envelope.surface_id(envelope), cid)
+  end
 
+  def emit(tool_name, _args, ctx) do
+    Logger.error(
+      "[A2UI tool] #{tool_name} called without :conversation_id in ctx=#{inspect(ctx)}"
+    )
+
+    {:error, "missing_conversation_context"}
+  end
+
+  @doc """
+  Streamed-JSON entry point. Takes an already-built wire envelope (parsed out
+  of the assistant's JSONL stream) and runs it through the same pipeline as a
+  tool-call envelope. Returns `{:error, "unknown_envelope_type"}` if the map
+  doesn't carry one of the four recognised kind keys.
+  """
+  @spec from_envelope(map(), String.t()) :: {:ok, map()} | {:error, String.t()}
+  def from_envelope(envelope, cid) when is_map(envelope) and is_binary(cid) do
+    case Envelope.message_type(envelope) do
+      nil ->
+        {:error, "unknown_envelope_type"}
+
+      tool_name ->
+        do_emit(tool_name, envelope, Envelope.surface_id(envelope), cid)
+    end
+  end
+
+  defp do_emit(tool_name, envelope, surface_id, cid) do
     opts =
       case tool_name do
         :update_components ->
@@ -65,14 +95,6 @@ defmodule AgenticUi.LLM.Tools.Emit do
         Logger.warning("[A2UI tool] #{tool_name} #{msg}")
         {:error, msg}
     end
-  end
-
-  def emit(tool_name, _args, ctx) do
-    Logger.error(
-      "[A2UI tool] #{tool_name} called without :conversation_id in ctx=#{inspect(ctx)}"
-    )
-
-    {:error, "missing_conversation_context"}
   end
 
   defp persist_with_race_retry(tool_name, cid, envelope)

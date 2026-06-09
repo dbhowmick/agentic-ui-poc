@@ -26,8 +26,6 @@ defmodule AgenticUi.A2UI.Validator do
 
   @raw_schema_json File.read!(@schema_path)
 
-  @child_fields ~w(child children content header footer items)
-
   @type stage :: :schema | :catalog
   @type validation_error :: %{stage: stage(), message: String.t()}
   @type opts :: [known_component_ids: MapSet.t()]
@@ -144,6 +142,7 @@ defmodule AgenticUi.A2UI.Validator do
   defp catalog_validate(%{"updateComponents" => %{"components" => components}}, opts) do
     catalog = Catalog.get()
     component_defs = Map.get(catalog, "components", %{})
+    child_fields = Catalog.child_field_index(catalog)
 
     known_external =
       Keyword.get(opts, :known_component_ids, MapSet.new())
@@ -152,7 +151,7 @@ defmodule AgenticUi.A2UI.Validator do
     all_known = MapSet.union(known_external, batch_ids)
 
     Enum.reduce_while(components, :ok, fn comp, _acc ->
-      case check_component(comp, component_defs, all_known) do
+      case check_component(comp, component_defs, child_fields, all_known) do
         :ok -> {:cont, :ok}
         {:error, %{message: msg}} -> {:halt, {:error, "catalog: " <> msg}}
       end
@@ -161,7 +160,7 @@ defmodule AgenticUi.A2UI.Validator do
 
   defp catalog_validate(_envelope, _opts), do: :ok
 
-  defp check_component(%{"component" => name} = comp, component_defs, all_known) do
+  defp check_component(%{"component" => name} = comp, component_defs, child_fields, all_known) do
     case Map.fetch(component_defs, name) do
       :error ->
         {:error,
@@ -172,12 +171,13 @@ defmodule AgenticUi.A2UI.Validator do
 
       {:ok, def_schema} ->
         with :ok <- check_required(comp, def_schema, name) do
-          check_child_refs(comp, all_known, name)
+          field_set = Map.get(child_fields, name, MapSet.new())
+          check_child_refs(comp, field_set, all_known, name)
         end
     end
   end
 
-  defp check_component(comp, _component_defs, _all_known) do
+  defp check_component(comp, _component_defs, _child_fields, _all_known) do
     {:error,
      %{stage: :catalog, message: "component missing 'component' key (id=#{inspect(comp["id"])})"}}
   end
@@ -213,8 +213,8 @@ defmodule AgenticUi.A2UI.Validator do
   defp leaf_required(%{"required" => required}) when is_list(required), do: required
   defp leaf_required(_), do: []
 
-  defp check_child_refs(comp, all_known, name) do
-    refs = collect_child_refs(comp)
+  defp check_child_refs(comp, field_set, all_known, name) do
+    refs = collect_child_refs(comp, field_set)
     missing = Enum.reject(refs, &MapSet.member?(all_known, &1))
 
     case missing do
@@ -231,13 +231,14 @@ defmodule AgenticUi.A2UI.Validator do
     end
   end
 
-  # Walk the component object collecting strings sitting in commonly-named
-  # child fields. Phase 3 heuristic — covers Column.children, Row.children,
-  # Card.child, etc. without needing per-component schemas.
-  defp collect_child_refs(comp) when is_map(comp) do
+  # Walk only the props the catalog says are `ComponentId` (or arrays of
+  # ComponentIds). Catalog-driven instead of the prior static field-name
+  # heuristic, which falsely flagged literal-string props like
+  # `Markdown.content` as missing child references.
+  defp collect_child_refs(comp, field_set) when is_map(comp) do
     Enum.flat_map(comp, fn
-      {field, value} when field in @child_fields -> extract_strings(value)
-      _ -> []
+      {field, value} ->
+        if MapSet.member?(field_set, field), do: extract_strings(value), else: []
     end)
   end
 

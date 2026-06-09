@@ -3,23 +3,35 @@ defmodule AgenticUiWeb.ChatChannel do
   One channel per chat conversation. Topic shape: `chat:<conversation_id>`.
 
   On join, ensures a `Jido.AgentServer` is running for this conversation under
-  `AgenticUi.Jido`. On `"user_message"`, spawns a `Task` that calls
-  `AgenticUi.LLM.Agent.ask_stream/3`, relays streaming signals to the client,
-  and persists the user + assistant rows at turn boundaries.
+  `AgenticUi.Jido`. The agent module is picked from the conversation's `mode`
+  field — `AgenticUi.LLM.Agent` for `tool_calls`, `AgenticUi.LLM.AgentStreamedJson`
+  for `streamed_json`. On `"user_message"`, spawns a `Task` that calls
+  `ask_stream/3` on the per-mode module, relays streaming signals to the
+  client, and persists the user + assistant rows at turn boundaries.
+
+  In `:streamed_json` mode the agent has no tools registered and writes A2UI
+  envelopes as JSONL in its message body. Per-`:llm_delta` `:content` chunks
+  are teed through `AgenticUi.LLM.JsonlInterpreter`, which classifies complete
+  lines as prose vs. envelopes. Prose is forwarded as `assistant_token`;
+  envelopes go through `AgenticUi.LLM.Tools.Emit.from_envelope/2` (the same
+  validate → persist → broadcast pipeline the tool path uses).
   """
   use AgenticUiWeb, :channel
   require Logger
 
-  alias AgenticUi.A2UI.ClientAction
+  alias AgenticUi.A2UI.{ClientAction, Envelope}
   alias AgenticUi.Chat
   alias AgenticUi.Chat.Schemas.SurfaceSnapshot
   alias AgenticUi.LLM
+  alias AgenticUi.LLM.JsonlInterpreter
+  alias AgenticUi.LLM.Tools.Emit
 
   @impl true
   def join("chat:" <> conversation_id, _params, socket) do
     with {:uuid, {:ok, _}} <- {:uuid, Ecto.UUID.cast(conversation_id)},
          %_{} = conv <- Chat.get_conversation(conversation_id),
-         {:ok, agent_pid} <- ensure_agent(conversation_id) do
+         agent_mod = agent_module(conv.mode),
+         {:ok, agent_pid} <- ensure_agent(conversation_id, agent_mod) do
       :ok = Phoenix.PubSub.subscribe(AgenticUi.PubSub, "chat:" <> conversation_id)
 
       socket =
@@ -27,6 +39,8 @@ defmodule AgenticUiWeb.ChatChannel do
         |> assign(:conversation_id, conversation_id)
         |> assign(:conversation, conv)
         |> assign(:agent_pid, agent_pid)
+        |> assign(:agent_mod, agent_mod)
+        |> assign(:mode, conv.mode)
 
       send(self(), :after_join)
       {:ok, socket}
@@ -37,11 +51,14 @@ defmodule AgenticUiWeb.ChatChannel do
     end
   end
 
-  defp ensure_agent(id) do
+  defp agent_module("streamed_json"), do: LLM.AgentStreamedJson
+  defp agent_module(_), do: LLM.Agent
+
+  defp ensure_agent(id, agent_mod) do
     case AgenticUi.Jido.whereis(id) do
       nil ->
-        initial_state = LLM.Agent.build_initial_state(Chat.list_messages(id))
-        AgenticUi.Jido.start_agent(LLM.Agent, id: id, initial_state: initial_state)
+        initial_state = agent_mod.build_initial_state(Chat.list_messages(id))
+        AgenticUi.Jido.start_agent(agent_mod, id: id, initial_state: initial_state)
 
       pid ->
         {:ok, pid}
@@ -80,9 +97,9 @@ defmodule AgenticUiWeb.ChatChannel do
   def handle_in("user_message", %{"content" => content}, socket)
       when is_binary(content) and content != "" do
     parent = self()
-    %{conversation_id: cid, agent_pid: agent_pid} = socket.assigns
+    %{conversation_id: cid, agent_pid: agent_pid, agent_mod: mod, mode: mode} = socket.assigns
 
-    Task.start(fn -> run_turn(parent, cid, agent_pid, content) end)
+    Task.start(fn -> run_turn(parent, cid, agent_pid, mod, mode, content) end)
     {:reply, :ok, socket}
   end
 
@@ -95,8 +112,8 @@ defmodule AgenticUiWeb.ChatChannel do
     case ClientAction.cast(payload) do
       {:ok, %ClientAction{} = action} ->
         parent = self()
-        %{conversation_id: cid, agent_pid: agent_pid} = socket.assigns
-        Task.start(fn -> run_action_turn(parent, cid, agent_pid, action) end)
+        %{conversation_id: cid, agent_pid: agent_pid, agent_mod: mod, mode: mode} = socket.assigns
+        Task.start(fn -> run_action_turn(parent, cid, agent_pid, mod, mode, action) end)
         {:reply, :ok, socket}
 
       {:error, reason} ->
@@ -113,13 +130,13 @@ defmodule AgenticUiWeb.ChatChannel do
 
   # --- per-turn orchestration ---
 
-  defp run_turn(channel_pid, cid, agent_pid, content) do
+  defp run_turn(channel_pid, cid, agent_pid, mod, mode, content) do
     _ = Chat.insert_message!(%{conversation_id: cid, role: "user", content: content})
 
-    case LLM.Agent.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
+    case mod.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
       {:ok, %{request: request, events: events}} ->
-        {assistant_text, surface_ids} = relay_stream(events, channel_pid)
-        _ = LLM.Agent.await(request, timeout: 60_000)
+        {assistant_text, surface_ids} = relay_stream(events, channel_pid, cid, mode)
+        _ = mod.await(request, timeout: 60_000)
 
         _ =
           Chat.insert_message!(%{
@@ -136,11 +153,11 @@ defmodule AgenticUiWeb.ChatChannel do
     end
   end
 
-  # Same orchestration as `run_turn/4`, but the incoming content is synthesised
+  # Same orchestration as `run_turn/6`, but the incoming content is synthesised
   # from a client-side A2UI action. The user row carries the structured action
   # payload in `tool_results` so the frontend can render it distinctly without
   # re-parsing the synthesised text.
-  defp run_action_turn(channel_pid, cid, agent_pid, %ClientAction{} = action) do
+  defp run_action_turn(channel_pid, cid, agent_pid, mod, mode, %ClientAction{} = action) do
     content = ClientAction.to_user_content(action)
 
     _ =
@@ -151,10 +168,10 @@ defmodule AgenticUiWeb.ChatChannel do
         tool_results: [ClientAction.to_payload(action)]
       })
 
-    case LLM.Agent.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
+    case mod.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
       {:ok, %{request: request, events: events}} ->
-        {assistant_text, surface_ids} = relay_stream(events, channel_pid)
-        _ = LLM.Agent.await(request, timeout: 60_000)
+        {assistant_text, surface_ids} = relay_stream(events, channel_pid, cid, mode)
+        _ = mod.await(request, timeout: 60_000)
 
         _ =
           Chat.insert_message!(%{
@@ -171,12 +188,9 @@ defmodule AgenticUiWeb.ChatChannel do
     end
   end
 
-  # Iterate the Jido.AI runtime event stream. Returns `{accumulated_text,
-  # surface_ids_created}` where `surface_ids_created` is the MapSet of surface
-  # IDs that this turn's `create_surface` tool calls successfully created.
-  # `update_components` / `update_data_model` don't count — only the originating
-  # message of a surface owns the inline panel.
-  defp relay_stream(events, channel_pid) do
+  # Tool-calls mode: assistant text is the only content. Surface IDs come from
+  # `create_surface` tool completions.
+  defp relay_stream(events, channel_pid, _cid, "tool_calls") do
     Enum.reduce(events, {"", MapSet.new()}, fn event, {text, sids} ->
       log_tool_event(event)
 
@@ -195,6 +209,57 @@ defmodule AgenticUiWeb.ChatChannel do
           {text, sids}
       end
     end)
+  end
+
+  # Streamed-JSON mode: content deltas are fed into a JsonlInterpreter and
+  # classified into prose vs. envelopes. Prose is forwarded to the chat panel
+  # as assistant_token AND accumulated for the persisted assistant row.
+  # Envelopes go through Emit.from_envelope/2 (validate → persist → broadcast).
+  # We flush the interpreter on stream end so a trailing unterminated line is
+  # still processed.
+  defp relay_stream(events, channel_pid, cid, "streamed_json") do
+    {text, sids, state} =
+      Enum.reduce(
+        events,
+        {"", MapSet.new(), JsonlInterpreter.new()},
+        fn event, {text, sids, state} ->
+          case extract_delta(event) do
+            {:content, delta} ->
+              {state, emissions} = JsonlInterpreter.feed(state, delta)
+              {text2, sids2} = drain_emissions(emissions, channel_pid, cid, text, sids)
+              {text2, sids2, state}
+
+            _other ->
+              {text, sids, state}
+          end
+        end
+      )
+
+    {text2, sids2} = drain_emissions(JsonlInterpreter.flush(state), channel_pid, cid, text, sids)
+    {text2, sids2}
+  end
+
+  defp drain_emissions(emissions, channel_pid, cid, text0, sids0) do
+    Enum.reduce(emissions, {text0, sids0}, fn
+      {:text, txt}, {text, sids} ->
+        send(channel_pid, {:assistant_token, txt})
+        {text <> txt, sids}
+
+      {:envelope, env}, {text, sids} ->
+        {text, apply_envelope_result(Emit.from_envelope(env, cid), env, sids, channel_pid)}
+    end)
+  end
+
+  defp apply_envelope_result({:ok, %{surface_id: sid}}, env, sids, _channel_pid) do
+    case Envelope.message_type(env) do
+      :create_surface when is_binary(sid) -> MapSet.put(sids, sid)
+      _ -> sids
+    end
+  end
+
+  defp apply_envelope_result({:error, reason}, _env, sids, channel_pid) do
+    send(channel_pid, {:llm_error, reason})
+    sids
   end
 
   # A successful `create_surface` tool completion looks like:

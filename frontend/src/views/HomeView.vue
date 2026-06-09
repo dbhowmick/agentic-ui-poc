@@ -1,26 +1,42 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { Button, toast } from '@meldui/vue'
 import { IconMessageCircle, IconPlus } from '@meldui/tabler-vue'
 import { useConversationsStore } from '@/stores/conversations'
-import type { Conversation } from '@/types/chat'
+import NewChatDialog from '@/components/NewChatDialog.vue'
+import type { Conversation, ConversationMode } from '@/types/chat'
 
 const router = useRouter()
 const conversations = useConversationsStore()
 
 const rows = computed(() => conversations.list ?? [])
+const dialogOpen = ref(false)
+const creating = ref(false)
 
 onMounted(() => {
   conversations.fetchAll()
 })
 
-async function newChat() {
+function openNewChat() {
+  dialogOpen.value = true
+}
+
+async function createChat(payload: {
+  mode: ConversationMode
+  model: string
+  title: string | null
+}) {
+  if (creating.value) return
+  creating.value = true
   try {
-    const conv = await conversations.create({ mode: 'tool_calls' })
+    const conv = await conversations.create(payload)
+    dialogOpen.value = false
     router.push({ name: 'chat', params: { id: conv.id } })
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    creating.value = false
   }
 }
 
@@ -51,11 +67,17 @@ function timeAgo(iso: string) {
           <h1 class="font-display text-3xl font-semibold tracking-tight">AgenticUi</h1>
           <p class="mt-1 text-sm text-muted-foreground">A2UI POC — chat with Claude.</p>
         </div>
-        <Button @click="newChat">
+        <Button @click="openNewChat">
           <IconPlus class="size-4" />
           New chat
         </Button>
       </header>
+
+      <NewChatDialog
+        v-model:open="dialogOpen"
+        :submitting="creating"
+        @create="createChat"
+      />
 
       <div v-if="conversations.loading" class="text-sm text-muted-foreground">
         Loading…
@@ -67,7 +89,7 @@ function timeAgo(iso: string) {
       >
         <IconMessageCircle class="mx-auto size-8 text-muted-foreground" />
         <p class="mt-4 text-sm text-muted-foreground">No conversations yet.</p>
-        <Button class="mt-4" @click="newChat">
+        <Button class="mt-4" @click="openNewChat">
           <IconPlus class="size-4" />
           Start chatting
         </Button>
