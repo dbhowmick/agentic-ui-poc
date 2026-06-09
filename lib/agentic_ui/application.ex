@@ -13,6 +13,7 @@ defmodule AgenticUi.Application do
       {DNSCluster, query: Application.get_env(:agentic_ui, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: AgenticUi.PubSub},
       {Oban, Application.fetch_env!(:agentic_ui, Oban)},
+      AgenticUi.A2UI.Catalog,
       AgenticUi.Jido,
       # Start a worker by calling: AgenticUi.Worker.start_link(arg)
       # {AgenticUi.Worker, arg},

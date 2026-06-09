@@ -2,14 +2,34 @@ defmodule AgenticUi.LLM.Agent do
   @moduledoc """
   Conversation-level AI agent (ReAct strategy via `Jido.AI.Agent`).
 
-  Phase 0: no tools, plain chat. Phase 2+ adds A2UI emission tools and embeds
-  the MeldUI catalog into the system prompt.
+  Phase 2: the four A2UI envelope tools (`CreateSurface`, `UpdateComponents`,
+  `UpdateDataModel`, `DeleteSurface`) are wired, and the system prompt embeds
+  the MeldUI catalog read from the vendored snapshot at compile time.
+
+  Why compile-time: `Jido.AI.Agent`'s `system_prompt:` option only accepts
+  compile-time literals (binaries, nil, false, or module attributes resolving
+  to one). The vendored catalog under `priv/a2ui/catalog.json` is the build-time
+  source of truth; `AgenticUi.A2UI.Catalog` still refreshes from the upstream
+  URL at boot for use by the validator and tools (Phase 3+). To pick up an
+  upstream catalog change in the system prompt, refresh the vendored file and
+  rebuild (`@external_resource` triggers recompile when it changes).
   """
+
+  @catalog_path Path.join(:code.priv_dir(:agentic_ui), "a2ui/catalog.json")
+  @external_resource @catalog_path
+  @catalog_json File.read!(@catalog_path)
+  @system_prompt AgenticUi.LLM.SystemPrompt.build(@catalog_json)
+
   use Jido.AI.Agent,
     name: "a2ui_agent",
     model: :default,
-    tools: [],
-    system_prompt: "You are the A2UI POC assistant. Be concise."
+    tools: [
+      AgenticUi.LLM.Tools.CreateSurface,
+      AgenticUi.LLM.Tools.UpdateComponents,
+      AgenticUi.LLM.Tools.UpdateDataModel,
+      AgenticUi.LLM.Tools.DeleteSurface
+    ],
+    system_prompt: @system_prompt
 
   alias AgenticUi.Chat.Schemas.Message
   alias Jido.AI.Context

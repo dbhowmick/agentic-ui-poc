@@ -91,7 +91,7 @@ defmodule AgenticUiWeb.ChatChannel do
   defp run_turn(channel_pid, cid, agent_pid, content) do
     _ = Chat.insert_message!(%{conversation_id: cid, role: "user", content: content})
 
-    case LLM.Agent.ask_stream(agent_pid, content) do
+    case LLM.Agent.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
       {:ok, %{request: request, events: events}} ->
         assistant_text = relay_stream(events, channel_pid)
         _ = LLM.Agent.await(request, timeout: 60_000)
@@ -117,6 +117,8 @@ defmodule AgenticUiWeb.ChatChannel do
   # are dropped here.
   defp relay_stream(events, channel_pid) do
     Enum.reduce(events, "", fn event, acc ->
+      log_tool_event(event)
+
       case extract_delta(event) do
         {:content, delta} ->
           send(channel_pid, {:assistant_token, delta})
@@ -137,4 +139,12 @@ defmodule AgenticUiWeb.ChatChannel do
   end
 
   defp extract_delta(_), do: :ignore
+
+  defp log_tool_event(%{kind: :tool_started, tool_name: name, data: data}),
+    do: Logger.debug("[A2UI tool] started #{name} data=#{inspect(data)}")
+
+  defp log_tool_event(%{kind: :tool_completed, tool_name: name, data: data}),
+    do: Logger.debug("[A2UI tool] completed #{name} data=#{inspect(data)}")
+
+  defp log_tool_event(_), do: :ok
 end
