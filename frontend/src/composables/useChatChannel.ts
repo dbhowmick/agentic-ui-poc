@@ -87,13 +87,19 @@ export function useChatChannel(conversationId: string): UseChatChannel {
 
   channel.on('a2ui_envelope', (envelope: A2UIEnvelope) => {
     envelopes.value = [...envelopes.value, envelope]
-    // Progressive rendering: when a `createSurface` arrives mid-turn, attach
-    // its surfaceId to the currently-streaming assistant placeholder so the
-    // inline panel mounts immediately. If no placeholder exists yet (the
-    // create_surface tool fired before the first text delta), create one
-    // with empty content. The persisted row at `assistant_done` will replace
-    // the placeholder and carry the canonical `surface_ids` list.
-    const sid = envelope.createSurface?.surfaceId
+    // Progressive rendering: attach the touched surfaceId to the currently
+    // streaming assistant placeholder for ANY mutating envelope, not only
+    // `createSurface`. The render-time owner-derivation in ChatMessageList
+    // then pins each surface to the *latest* assistant turn that touched it,
+    // so a resubmitted form follows the conversation downward instead of
+    // staying at its original (now scrolled-up) position. `deleteSurface` is
+    // skipped — the processor's onSurfaceDeleted signal removes the renderer
+    // and there's no useful "owner" for a destroyed surface. If no
+    // placeholder exists yet (a tool fired before the first text delta) the
+    // attach helper creates one with empty content; the persisted row at
+    // `assistant_done` will replace the placeholder and carry the canonical
+    // touched-surface list from the backend.
+    const sid = touchedSurfaceId(envelope)
     if (sid) attachSurfaceIdToStreamingMessage(sid)
   })
 
@@ -127,6 +133,15 @@ export function useChatChannel(conversationId: string): UseChatChannel {
       latency_ms: payload.latency_ms ?? target.latency_ms,
     }
     messages.value = [...list.slice(0, idx), next, ...list.slice(idx + 1)]
+  }
+
+  function touchedSurfaceId(envelope: A2UIEnvelope): string | null {
+    return (
+      envelope.createSurface?.surfaceId ??
+      envelope.updateComponents?.surfaceId ??
+      envelope.updateDataModel?.surfaceId ??
+      null
+    )
   }
 
   function attachSurfaceIdToStreamingMessage(surfaceId: string) {

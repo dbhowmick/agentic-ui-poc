@@ -15,6 +15,24 @@ const stickToBottom = ref(true)
 
 const lastMessage = computed(() => props.messages.at(-1) ?? null)
 
+// Each surface renders at the *latest* assistant message whose `surface_ids`
+// includes it. Walk messages forward — the last write wins, which is exactly
+// the most-recent touching turn. When the user resubmits a form, the backend
+// stamps the new assistant row's `surface_ids` with that surface, the streaming
+// composable mirrors it live, and this map's value shifts from message #N to
+// message #N+1 — so the rendered surface "follows" the conversation downward
+// instead of staying pinned at its first appearance way up the page.
+const surfaceOwner = computed(() => {
+  const owner = new Map<string, string>()
+  for (const msg of props.messages) {
+    if (msg.role !== 'assistant') continue
+    for (const sid of msg.surface_ids ?? []) {
+      owner.set(sid, msg.id)
+    }
+  }
+  return owner
+})
+
 function isLastAssistant(msg: Message) {
   return props.streaming && msg.id === lastMessage.value?.id && msg.role === 'assistant'
 }
@@ -121,13 +139,14 @@ function hasFooter(msg: Message) {
               :is-finished="!isLastAssistant(msg)"
             />
           </div>
-          <div
-            v-for="sid in msg.surface_ids ?? []"
-            :key="`${msg.id}/${sid}`"
-            class="self-start w-full"
-          >
-            <A2UISurface :surface-id="sid" />
-          </div>
+          <template v-for="sid in msg.surface_ids ?? []" :key="`${msg.id}/${sid}`">
+            <div
+              v-if="surfaceOwner.get(sid) === msg.id"
+              class="self-start w-full"
+            >
+              <A2UISurface :surface-id="sid" />
+            </div>
+          </template>
           <div
             v-if="hasFooter(msg)"
             class="self-start font-mono text-[10px] uppercase tracking-wide text-muted-foreground"

@@ -205,13 +205,17 @@ defmodule AgenticUiWeb.ChatChannel do
   end
 
   # Tool-calls mode: assistant text is the only content. Surface IDs come from
-  # `create_surface` tool completions.
+  # any mutating tool completion (create / update_components / update_data_model)
+  # — i.e. surfaces this turn *touched*, not just the ones it created. The
+  # frontend uses this set to "own" each surface to the latest assistant turn
+  # that rendered into it so a resubmitted form follows the conversation
+  # downward instead of staying pinned at its original message.
   defp relay_stream(events, channel_pid, _cid, "tool_calls") do
     Enum.reduce(events, {"", MapSet.new(), %{}}, fn event, {text, sids, usage} ->
       log_tool_event(event)
 
       sids =
-        case extract_created_surface(event) do
+        case extract_touched_surface(event) do
           {:ok, sid} -> MapSet.put(sids, sid)
           :none -> sids
         end
@@ -279,9 +283,16 @@ defmodule AgenticUiWeb.ChatChannel do
   end
 
   defp apply_envelope_result({:ok, %{surface_id: sid}}, env, sids, _channel_pid) do
+    # Pin to the touching turn for any mutating envelope, not only the create.
+    # `:delete_surface` is intentionally excluded — a deleted surface has no
+    # owning location, the renderer drops it on the processor's signal.
     case Envelope.message_type(env) do
-      :create_surface when is_binary(sid) -> MapSet.put(sids, sid)
-      _ -> sids
+      type
+      when type in [:create_surface, :update_components, :update_data_model] and is_binary(sid) ->
+        MapSet.put(sids, sid)
+
+      _ ->
+        sids
     end
   end
 
@@ -290,17 +301,22 @@ defmodule AgenticUiWeb.ChatChannel do
     sids
   end
 
-  # A successful `create_surface` tool completion looks like:
-  #   %{kind: :tool_completed, tool_name: "create_surface",
+  # A successful mutating tool completion (create_surface / update_components /
+  # update_data_model) looks like:
+  #   %{kind: :tool_completed, tool_name: <name>,
   #     data: %{result: {:ok, %{surface_id: sid, ...}, _effects},
-  #             tool_name: "create_surface", ...}}
+  #             tool_name: <name>, ...}}
+  # All three Emit-backed tools return `{:ok, %{acknowledged: true, surface_id: sid}}`
+  # via `AgenticUi.LLM.Tools.Emit.emit/3`, so the same match handles them all.
+  # `delete_surface` is intentionally excluded — see `apply_envelope_result/4`.
   # Match both the 3-tuple `{status, value, effects}` (Jido canonical) and the
   # 2-tuple `{status, value}` for defensiveness against future shape drift.
-  defp extract_created_surface(%{
+  defp extract_touched_surface(%{
          kind: :tool_completed,
-         tool_name: "create_surface",
+         tool_name: name,
          data: %{result: result}
-       }) do
+       })
+       when name in ["create_surface", "update_components", "update_data_model"] do
     case result do
       {:ok, %{surface_id: sid}, _effects} when is_binary(sid) -> {:ok, sid}
       {:ok, %{surface_id: sid}} when is_binary(sid) -> {:ok, sid}
@@ -308,7 +324,7 @@ defmodule AgenticUiWeb.ChatChannel do
     end
   end
 
-  defp extract_created_surface(_), do: :none
+  defp extract_touched_surface(_), do: :none
 
   # The per-turn usage rollup arrives on the `:request_completed` event.
   # `Jido.AI.Usage.normalize/1` upstream coerces provider keys into atoms:
