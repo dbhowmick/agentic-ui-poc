@@ -40,6 +40,12 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Default model alias used by AgenticUi.LLM.Agent. Tune here, not in code.
+config :jido_ai,
+  model_aliases: %{
+    default: "anthropic:claude-sonnet-4-5-20250929"
+  }
+
 # Auth configuration is inserted above the next line by `mix phoenix_vue.gen.auth`.
 # phoenix_vue:gen.auth:config_anchor
 

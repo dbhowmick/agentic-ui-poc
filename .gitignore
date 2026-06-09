@@ -45,3 +45,6 @@ npm-debug.log
 /frontend/dist/
 /frontend/.vite/
 /priv/static/assets/
+
+
+.env

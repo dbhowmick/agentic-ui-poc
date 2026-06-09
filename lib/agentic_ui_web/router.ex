@@ -18,6 +18,12 @@ defmodule AgenticUiWeb.Router do
   # Auth pipelines are inserted above the next line by `mix phoenix_vue.gen.auth`.
   # phoenix_vue:gen.auth:pipelines_anchor
 
+  scope "/api", AgenticUiWeb do
+    pipe_through :api
+
+    resources "/conversations", ConversationsController, only: [:index, :create, :show]
+  end
+
   # API scopes are inserted above the next line by `mix phoenix_vue.gen.auth`.
   # Declare additional scopes ABOVE that anchor so they match before the SPA
   # catch-all at the bottom of this file.

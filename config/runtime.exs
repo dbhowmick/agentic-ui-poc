@@ -72,6 +72,20 @@ config :agentic_ui, Oban,
   queues: oban_queues,
   plugins: oban_plugins
 
+# Anthropic credentials for jido_ai → req_llm. Required in prod; warn-only in dev/test
+# so the app can boot without a key while exercising channel + REST plumbing.
+case {System.get_env("ANTHROPIC_API_KEY"), config_env()} do
+  {nil, :prod} ->
+    raise "ANTHROPIC_API_KEY is required in production"
+
+  {nil, _env} ->
+    require Logger
+    Logger.warning("ANTHROPIC_API_KEY not set; LLM calls will fail at runtime")
+
+  {value, _env} ->
+    config :req_llm, anthropic_api_key: value
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
