@@ -88,8 +88,8 @@ defmodule AgenticUiWeb do
       import AgenticUiWeb.CoreComponents
 
       # Common modules used in templates
-      alias Phoenix.LiveView.JS
       alias AgenticUiWeb.Layouts
+      alias Phoenix.LiveView.JS
 
       # Routes generation with the ~p sigil
       unquote(verified_routes())

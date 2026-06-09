@@ -10,6 +10,8 @@ defmodule AgenticUi.Chat.Schemas.Conversation do
 
   @derive {Jason.Encoder, only: [:id, :title, :mode, :model, :inserted_at, :updated_at]}
 
+  @type t :: %__MODULE__{}
+
   schema "conversations" do
     field :title, :string
     field :mode, :string, default: "tool_calls"

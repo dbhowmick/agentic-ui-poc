@@ -83,8 +83,8 @@ defmodule AgenticUiWeb.ChatChannel do
     {:noreply, socket}
   end
 
-  def handle_info({:assistant_done, _cid}, socket) do
-    push(socket, "assistant_done", %{})
+  def handle_info({:assistant_done, payload}, socket) when is_map(payload) do
+    push(socket, "assistant_done", payload)
     {:noreply, socket}
   end
 
@@ -133,20 +133,28 @@ defmodule AgenticUiWeb.ChatChannel do
   defp run_turn(channel_pid, cid, agent_pid, mod, mode, content) do
     _ = Chat.insert_message!(%{conversation_id: cid, role: "user", content: content})
 
+    t0 = System.monotonic_time(:millisecond)
+
     case mod.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
       {:ok, %{request: request, events: events}} ->
-        {assistant_text, surface_ids} = relay_stream(events, channel_pid, cid, mode)
+        {assistant_text, surface_ids, usage} = relay_stream(events, channel_pid, cid, mode)
         _ = mod.await(request, timeout: 60_000)
+        latency_ms = System.monotonic_time(:millisecond) - t0
 
-        _ =
+        msg =
           Chat.insert_message!(%{
             conversation_id: cid,
             role: "assistant",
             content: assistant_text,
-            surface_ids: MapSet.to_list(surface_ids)
+            surface_ids: MapSet.to_list(surface_ids),
+            usage: usage,
+            latency_ms: latency_ms
           })
 
-        send(channel_pid, {:assistant_done, cid})
+        send(
+          channel_pid,
+          {:assistant_done, %{message_id: msg.id, usage: usage, latency_ms: latency_ms}}
+        )
 
       {:error, reason} ->
         send(channel_pid, {:llm_error, reason})
@@ -168,20 +176,28 @@ defmodule AgenticUiWeb.ChatChannel do
         tool_results: [ClientAction.to_payload(action)]
       })
 
+    t0 = System.monotonic_time(:millisecond)
+
     case mod.ask_stream(agent_pid, content, tool_context: %{conversation_id: cid}) do
       {:ok, %{request: request, events: events}} ->
-        {assistant_text, surface_ids} = relay_stream(events, channel_pid, cid, mode)
+        {assistant_text, surface_ids, usage} = relay_stream(events, channel_pid, cid, mode)
         _ = mod.await(request, timeout: 60_000)
+        latency_ms = System.monotonic_time(:millisecond) - t0
 
-        _ =
+        msg =
           Chat.insert_message!(%{
             conversation_id: cid,
             role: "assistant",
             content: assistant_text,
-            surface_ids: MapSet.to_list(surface_ids)
+            surface_ids: MapSet.to_list(surface_ids),
+            usage: usage,
+            latency_ms: latency_ms
           })
 
-        send(channel_pid, {:assistant_done, cid})
+        send(
+          channel_pid,
+          {:assistant_done, %{message_id: msg.id, usage: usage, latency_ms: latency_ms}}
+        )
 
       {:error, reason} ->
         send(channel_pid, {:llm_error, reason})
@@ -191,7 +207,7 @@ defmodule AgenticUiWeb.ChatChannel do
   # Tool-calls mode: assistant text is the only content. Surface IDs come from
   # `create_surface` tool completions.
   defp relay_stream(events, channel_pid, _cid, "tool_calls") do
-    Enum.reduce(events, {"", MapSet.new()}, fn event, {text, sids} ->
+    Enum.reduce(events, {"", MapSet.new(), %{}}, fn event, {text, sids, usage} ->
       log_tool_event(event)
 
       sids =
@@ -200,13 +216,19 @@ defmodule AgenticUiWeb.ChatChannel do
           :none -> sids
         end
 
+      usage =
+        case extract_usage(event) do
+          {:ok, u} -> u
+          :none -> usage
+        end
+
       case extract_delta(event) do
         {:content, delta} ->
           send(channel_pid, {:assistant_token, delta})
-          {text <> delta, sids}
+          {text <> delta, sids, usage}
 
         _other ->
-          {text, sids}
+          {text, sids, usage}
       end
     end)
   end
@@ -218,25 +240,31 @@ defmodule AgenticUiWeb.ChatChannel do
   # We flush the interpreter on stream end so a trailing unterminated line is
   # still processed.
   defp relay_stream(events, channel_pid, cid, "streamed_json") do
-    {text, sids, state} =
+    {text, sids, state, usage} =
       Enum.reduce(
         events,
-        {"", MapSet.new(), JsonlInterpreter.new()},
-        fn event, {text, sids, state} ->
+        {"", MapSet.new(), JsonlInterpreter.new(), %{}},
+        fn event, {text, sids, state, usage} ->
+          usage =
+            case extract_usage(event) do
+              {:ok, u} -> u
+              :none -> usage
+            end
+
           case extract_delta(event) do
             {:content, delta} ->
               {state, emissions} = JsonlInterpreter.feed(state, delta)
               {text2, sids2} = drain_emissions(emissions, channel_pid, cid, text, sids)
-              {text2, sids2, state}
+              {text2, sids2, state, usage}
 
             _other ->
-              {text, sids, state}
+              {text, sids, state, usage}
           end
         end
       )
 
     {text2, sids2} = drain_emissions(JsonlInterpreter.flush(state), channel_pid, cid, text, sids)
-    {text2, sids2}
+    {text2, sids2, usage}
   end
 
   defp drain_emissions(emissions, channel_pid, cid, text0, sids0) do
@@ -281,6 +309,27 @@ defmodule AgenticUiWeb.ChatChannel do
   end
 
   defp extract_created_surface(_), do: :none
+
+  # The per-turn usage rollup arrives on the `:request_completed` event.
+  # `Jido.AI.Usage.normalize/1` upstream coerces provider keys into atoms:
+  # `:input_tokens`, `:output_tokens`, `:total_tokens`,
+  # `:cache_creation_input_tokens`, `:cache_read_input_tokens`. Provider extras
+  # (e.g. cost fields, `:reasoning_tokens`) pass through verbatim. We persist
+  # the full map so the frontend can display whatever keys came back.
+  # See NOTES.md for the upstream event taxonomy.
+  defp extract_usage(%{kind: :request_completed, data: %{usage: usage}})
+       when is_map(usage) and map_size(usage) > 0,
+       do: {:ok, stringify_usage(usage)}
+
+  defp extract_usage(_), do: :none
+
+  # Postgres' :map column stores JSON, so atom keys round-trip to strings on
+  # reload. Normalising at write time keeps `messages.usage` shape-stable
+  # whether the row was just inserted (hot path: `assistant_done` push) or
+  # re-hydrated from history (`Chat.list_messages/1` → JSON decode).
+  defp stringify_usage(usage) when is_map(usage) do
+    Map.new(usage, fn {k, v} -> {to_string(k), v} end)
+  end
 
   defp extract_delta(%{kind: :llm_delta, data: %{delta: delta} = data})
        when is_binary(delta) and delta != "" do

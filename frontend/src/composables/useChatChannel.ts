@@ -1,7 +1,13 @@
 import { onBeforeUnmount, ref, shallowRef } from 'vue'
 import type { Channel } from 'phoenix'
 import { getSocket } from '@/lib/socket'
-import type { A2UIEnvelope, A2uiClientAction, Message, SurfaceReplay } from '@/types/chat'
+import type {
+  A2UIEnvelope,
+  A2uiClientAction,
+  Message,
+  SurfaceReplay,
+  UsageStats,
+} from '@/types/chat'
 
 interface HistoryPayload {
   messages: Message[]
@@ -17,6 +23,12 @@ interface ErrorPayload {
 
 interface ReplayPayload {
   surfaces: SurfaceReplay[]
+}
+
+interface AssistantDonePayload {
+  message_id?: string
+  usage?: UsageStats
+  latency_ms?: number
 }
 
 export interface UseChatChannel {
@@ -53,7 +65,8 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     appendDelta(delta)
   })
 
-  channel.on('assistant_done', () => {
+  channel.on('assistant_done', (payload: AssistantDonePayload = {}) => {
+    stampStreamingMessage(payload)
     streaming.value = false
     streamingId.value = null
   })
@@ -95,6 +108,26 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     .receive('timeout', () => {
       error.value = 'channel_join_timeout'
     })
+
+  // On `assistant_done` the backend hands back the persisted row id alongside
+  // the per-turn usage rollup and wall-clock latency. Stamp them onto the
+  // optimistic streaming placeholder so the footer renders without waiting
+  // for a history refetch. On a stale reconnect (no streamingId) this is a
+  // no-op — the next channel `history` push carries authoritative values.
+  function stampStreamingMessage(payload: AssistantDonePayload) {
+    const list = messages.value ?? []
+    const id = streamingId.value
+    const idx = id ? list.findIndex((m) => m.id === id) : -1
+    const target = idx >= 0 ? list[idx] : undefined
+    if (!target) return
+    const next: Message = {
+      ...target,
+      id: payload.message_id ?? target.id,
+      usage: payload.usage ?? target.usage,
+      latency_ms: payload.latency_ms ?? target.latency_ms,
+    }
+    messages.value = [...list.slice(0, idx), next, ...list.slice(idx + 1)]
+  }
 
   function attachSurfaceIdToStreamingMessage(surfaceId: string) {
     const list = messages.value ?? []

@@ -11,6 +11,18 @@ export interface Conversation {
 
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
 
+// Provider-normalized usage counters (`Jido.AI.Usage.normalize/1` server-side).
+// Keys are atoms in Elixir, JSON-encoded as strings; round-tripped values from
+// the messages table arrive with the same string keys.
+export interface UsageStats {
+  input_tokens?: number
+  output_tokens?: number
+  total_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+  [k: string]: number | string | undefined
+}
+
 export interface Message {
   id: string
   conversation_id: string
@@ -19,6 +31,8 @@ export interface Message {
   tool_calls: unknown[]
   tool_results: unknown[]
   surface_ids?: string[]
+  usage?: UsageStats | null
+  latency_ms?: number | null
   inserted_at: string
 }
 

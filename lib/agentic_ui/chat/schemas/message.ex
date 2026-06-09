@@ -17,8 +17,12 @@ defmodule AgenticUi.Chat.Schemas.Message do
              :tool_calls,
              :tool_results,
              :surface_ids,
+             :usage,
+             :latency_ms,
              :inserted_at
            ]}
+
+  @type t :: %__MODULE__{}
 
   schema "messages" do
     field :role, :string
@@ -26,6 +30,8 @@ defmodule AgenticUi.Chat.Schemas.Message do
     field :tool_calls, {:array, :map}, default: []
     field :tool_results, {:array, :map}, default: []
     field :surface_ids, {:array, :string}, default: []
+    field :usage, :map, default: %{}
+    field :latency_ms, :integer
 
     belongs_to :conversation, AgenticUi.Chat.Schemas.Conversation, type: :binary_id
 
@@ -34,7 +40,16 @@ defmodule AgenticUi.Chat.Schemas.Message do
 
   def changeset(msg, attrs) do
     msg
-    |> cast(attrs, [:conversation_id, :role, :content, :tool_calls, :tool_results, :surface_ids])
+    |> cast(attrs, [
+      :conversation_id,
+      :role,
+      :content,
+      :tool_calls,
+      :tool_results,
+      :surface_ids,
+      :usage,
+      :latency_ms
+    ])
     |> validate_required([:conversation_id, :role])
     |> validate_inclusion(:role, @roles)
     |> foreign_key_constraint(:conversation_id)

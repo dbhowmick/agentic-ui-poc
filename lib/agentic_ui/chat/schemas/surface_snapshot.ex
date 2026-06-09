@@ -9,6 +9,8 @@ defmodule AgenticUi.Chat.Schemas.SurfaceSnapshot do
   @derive {Jason.Encoder,
            only: [:conversation_id, :surface_id, :envelope_log, :data_model, :updated_at]}
 
+  @type t :: %__MODULE__{}
+
   schema "surface_snapshots" do
     field :surface_id, :string, primary_key: true
     field :envelope_log, {:array, :map}, default: []

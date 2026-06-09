@@ -2,9 +2,11 @@
 import { nextTick, ref, watch } from 'vue'
 import { Button } from '@meldui/vue'
 import { IconSend } from '@meldui/tabler-vue'
+import ScenarioPresets from '@/components/ScenarioPresets.vue'
 
 const props = defineProps<{
   disabled: boolean
+  showPresets?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -37,10 +39,30 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 watch(text, () => nextTick(autosize))
+
+// Don't auto-send presets — drop the prompt into the textarea so the user can
+// edit the seed before firing, and so a click followed by typing reads as one
+// continuous turn rather than two separate sends.
+function applyPreset(prompt: string) {
+  text.value = prompt
+  nextTick(() => {
+    autosize()
+    textareaRef.value?.focus()
+  })
+}
 </script>
 
 <template>
   <div class="border-t bg-background">
+    <div
+      v-if="showPresets"
+      class="mx-auto max-w-2xl px-6 pt-4"
+    >
+      <p class="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        Try one
+      </p>
+      <ScenarioPresets @select="applyPreset" />
+    </div>
     <form
       class="mx-auto flex max-w-2xl items-end gap-2 px-6 py-4"
       @submit.prevent="submit"

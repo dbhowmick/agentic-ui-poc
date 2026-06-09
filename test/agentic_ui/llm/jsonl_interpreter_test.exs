@@ -86,7 +86,8 @@ defmodule AgenticUi.LLM.JsonlInterpreterTest do
   test "markdown code-fence lines are swallowed (not forwarded as text)" do
     chunk =
       "```jsonl\n" <>
-        create_surface_line("fenced") <> "\n" <>
+        create_surface_line("fenced") <>
+        "\n" <>
         "```\n"
 
     {_state, emissions} = JsonlInterpreter.feed(JsonlInterpreter.new(), chunk)

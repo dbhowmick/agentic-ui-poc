@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { IncremarkContent } from '@incremark/vue'
 import { A2UISurface } from '@meldui/a2ui/vue'
 import { IconHandClick } from '@meldui/tabler-vue'
-import type { A2uiClientAction, Message } from '@/types/chat'
+import type { A2uiClientAction, Message, UsageStats } from '@/types/chat'
 
 const props = defineProps<{
   messages: Message[]
@@ -62,6 +62,28 @@ watch(
 )
 
 onMounted(scrollToBottom)
+
+// Footer formatting. Backend hands back the upstream `Jido.AI.Usage` shape with
+// atom keys ("input_tokens", "output_tokens", "cache_creation_input_tokens",
+// "cache_read_input_tokens"). We surface input/output as the headline numbers
+// and roll the two cache counters into a single "cache" figure — the blog cares
+// about cache-effectiveness, not the read-vs-write split.
+function usageInts(u: UsageStats | null | undefined) {
+  if (!u) return null
+  const input = numeric(u.input_tokens)
+  const output = numeric(u.output_tokens)
+  const cache = numeric(u.cache_read_input_tokens) + numeric(u.cache_creation_input_tokens)
+  if (input === 0 && output === 0 && cache === 0) return null
+  return { input, output, cache }
+}
+
+function numeric(v: unknown) {
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0
+}
+
+function hasFooter(msg: Message) {
+  return msg.role === 'assistant' && (usageInts(msg.usage) !== null || typeof msg.latency_ms === 'number')
+}
 </script>
 
 <template>
@@ -105,6 +127,22 @@ onMounted(scrollToBottom)
             class="self-start w-full"
           >
             <A2UISurface :surface-id="sid" />
+          </div>
+          <div
+            v-if="hasFooter(msg)"
+            class="self-start font-mono text-[10px] uppercase tracking-wide text-muted-foreground"
+          >
+            <template v-if="usageInts(msg.usage)">
+              <span>in {{ usageInts(msg.usage)!.input }}</span>
+              <span class="mx-1.5">·</span>
+              <span>out {{ usageInts(msg.usage)!.output }}</span>
+              <span class="mx-1.5">·</span>
+              <span>cache {{ usageInts(msg.usage)!.cache }}</span>
+            </template>
+            <template v-if="typeof msg.latency_ms === 'number'">
+              <span v-if="usageInts(msg.usage)" class="mx-1.5">·</span>
+              <span>{{ msg.latency_ms }} ms</span>
+            </template>
           </div>
         </template>
       </template>
