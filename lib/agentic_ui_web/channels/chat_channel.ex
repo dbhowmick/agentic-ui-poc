@@ -88,6 +88,11 @@ defmodule AgenticUiWeb.ChatChannel do
     {:noreply, socket}
   end
 
+  def handle_info({:tool_activity, payload}, socket) when is_map(payload) do
+    push(socket, "tool_activity", payload)
+    {:noreply, socket}
+  end
+
   def handle_info({:llm_error, reason}, socket) do
     push(socket, "error", %{message: inspect(reason)})
     {:noreply, socket}
@@ -214,6 +219,11 @@ defmodule AgenticUiWeb.ChatChannel do
     Enum.reduce(events, {"", MapSet.new(), %{}}, fn event, {text, sids, usage} ->
       log_tool_event(event)
 
+      case extract_tool_activity(event) do
+        {:ok, activity} -> send(channel_pid, {:tool_activity, activity})
+        :none -> :ok
+      end
+
       sids =
         case extract_touched_surface(event) do
           {:ok, sid} -> MapSet.put(sids, sid)
@@ -325,6 +335,91 @@ defmodule AgenticUiWeb.ChatChannel do
   end
 
   defp extract_touched_surface(_), do: :none
+
+  # Surface lifecycle events to the client so the UI can render per-stage
+  # spinners / error chips while the model is mid-turn. Tool started/completed
+  # are per-tool; llm_started/llm_completed bracket each model call between
+  # tool iterations so the user still sees a "Generating…" indicator during the
+  # gap between the text-content block and the first `tool_use` block.
+  defp extract_tool_activity(%{kind: :tool_started, tool_name: name} = event) do
+    {:ok,
+     %{
+       tool_call_id: tool_call_id(event),
+       tool_name: name,
+       status: "started",
+       kind: "tool"
+     }}
+  end
+
+  defp extract_tool_activity(%{kind: :tool_completed, tool_name: name, data: data} = event) do
+    {status, error, surface_id} = classify_tool_result(Map.get(data, :result))
+
+    payload =
+      %{
+        tool_call_id: tool_call_id(event),
+        tool_name: name,
+        status: status,
+        kind: "tool",
+        duration_ms: Map.get(data, :duration_ms)
+      }
+      |> maybe_put(:error, error)
+      |> maybe_put(:surface_id, surface_id)
+
+    {:ok, payload}
+  end
+
+  defp extract_tool_activity(%{kind: :llm_started} = event) do
+    {:ok,
+     %{
+       tool_call_id: llm_activity_id(event),
+       tool_name: "llm",
+       status: "started",
+       kind: "llm"
+     }}
+  end
+
+  defp extract_tool_activity(%{kind: :llm_completed} = event) do
+    {:ok,
+     %{
+       tool_call_id: llm_activity_id(event),
+       tool_name: "llm",
+       status: "completed",
+       kind: "llm"
+     }}
+  end
+
+  defp extract_tool_activity(_), do: :none
+
+  defp tool_call_id(%{tool_call_id: id, data: data}) do
+    id || Map.get(data || %{}, :tool_call_id) || Map.get(data || %{}, "tool_call_id")
+  end
+
+  defp llm_activity_id(%{llm_call_id: id, iteration: iter}),
+    do: "llm:#{id || "?"}:#{iter || 0}"
+
+  defp classify_tool_result({:ok, %{surface_id: sid}, _effects}) when is_binary(sid),
+    do: {"completed", nil, sid}
+
+  defp classify_tool_result({:ok, %{surface_id: sid}}) when is_binary(sid),
+    do: {"completed", nil, sid}
+
+  defp classify_tool_result({:ok, _, _}), do: {"completed", nil, nil}
+  defp classify_tool_result({:ok, _}), do: {"completed", nil, nil}
+
+  defp classify_tool_result({:error, %{message: msg}, _}) when is_binary(msg),
+    do: {"failed", msg, nil}
+
+  defp classify_tool_result({:error, %{message: msg}}) when is_binary(msg),
+    do: {"failed", msg, nil}
+
+  defp classify_tool_result({:error, reason}), do: {"failed", inspect_short(reason), nil}
+  defp classify_tool_result(_), do: {"completed", nil, nil}
+
+  defp inspect_short(term),
+    do: term |> inspect(limit: 5, printable_limit: 200) |> String.slice(0, 200)
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   # The per-turn usage rollup arrives on the `:request_completed` event.
   # `Jido.AI.Usage.normalize/1` upstream coerces provider keys into atoms:

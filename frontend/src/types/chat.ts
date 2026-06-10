@@ -65,3 +65,19 @@ export interface A2uiClientAction {
   timestamp: string
   context: Record<string, unknown>
 }
+
+// Activity event pushed by the backend channel while a turn is in flight.
+// Covers two kinds: `tool` (an A2UI tool call dispatched + returning) and
+// `llm` (the model is generating, i.e. the gap between content blocks /
+// between tool iterations). Keyed by `tool_call_id` so the UI can match
+// start/finish — for `llm` activities this is a synthetic id of the form
+// `llm:<llm_call_id>:<iteration>`.
+export interface ToolActivity {
+  tool_call_id: string
+  tool_name: string
+  status: 'started' | 'completed' | 'failed'
+  kind: 'tool' | 'llm'
+  error?: string
+  duration_ms?: number
+  surface_id?: string
+}

@@ -25,6 +25,7 @@ defmodule AgenticUi.LLM.AgentStreamedJson do
     model: :default,
     tools: [],
     system_prompt: @system_prompt,
+    max_tokens: 16_384,
     llm_opts: [provider_options: [anthropic_prompt_cache: true]]
 
   defdelegate build_initial_state(messages), to: AgenticUi.LLM.Agent

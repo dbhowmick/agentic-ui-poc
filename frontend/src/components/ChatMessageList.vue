@@ -2,13 +2,40 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { IncremarkContent } from '@incremark/vue'
 import { A2UISurface } from '@meldui/a2ui/vue'
-import { IconHandClick } from '@meldui/tabler-vue'
-import type { A2uiClientAction, Message, UsageStats } from '@/types/chat'
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconHandClick,
+  IconLoader2,
+} from '@meldui/tabler-vue'
+import type { A2uiClientAction, Message, ToolActivity, UsageStats } from '@/types/chat'
 
-const props = defineProps<{
-  messages: Message[]
-  streaming: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    messages: Message[]
+    streaming: boolean
+    activities?: ToolActivity[]
+  }>(),
+  { activities: () => [] },
+)
+
+const activeActivities = computed(() => props.activities ?? [])
+const visibleToolActivities = computed(() =>
+  activeActivities.value.filter((a) => a.kind !== 'llm'),
+)
+const hasLlmActivity = computed(() =>
+  activeActivities.value.some((a) => a.kind === 'llm' && a.status === 'started'),
+)
+
+function toolLabel(name: string) {
+  // `update_components` → "Update components". Keeps the tool name readable
+  // without baking a translation table for every action.
+  return name
+    .split('_')
+    .filter(Boolean)
+    .map((part, i) => (i === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(' ')
+}
 
 const scrollRef = ref<HTMLDivElement | null>(null)
 const stickToBottom = ref(true)
@@ -166,10 +193,39 @@ function hasFooter(msg: Message) {
         </template>
       </template>
 
-      <div v-if="streaming && messages.at(-1)?.role !== 'assistant'"
-        class="self-start text-sm text-muted-foreground italic"
+      <div
+        v-if="streaming && visibleToolActivities.length > 0"
+        class="self-start flex flex-col gap-1.5"
       >
-        Thinking…
+        <div
+          v-for="a in visibleToolActivities"
+          :key="a.tool_call_id"
+          class="inline-flex items-center gap-2 rounded-full border bg-muted/60 px-3 py-1 text-xs"
+          :class="{
+            'text-muted-foreground': a.status === 'started',
+            'text-emerald-700 dark:text-emerald-400': a.status === 'completed',
+            'border-destructive/40 text-destructive': a.status === 'failed',
+          }"
+        >
+          <IconLoader2 v-if="a.status === 'started'" class="size-3.5 animate-spin" />
+          <IconCheck v-else-if="a.status === 'completed'" class="size-3.5" />
+          <IconAlertTriangle v-else class="size-3.5" />
+          <span class="font-medium">{{ toolLabel(a.tool_name) }}</span>
+          <span v-if="a.surface_id" class="font-mono text-[10px] opacity-70">{{ a.surface_id }}</span>
+          <span v-if="a.status === 'failed' && a.error" class="font-mono text-[10px]">{{ a.error }}</span>
+          <span
+            v-else-if="a.status === 'completed' && typeof a.duration_ms === 'number'"
+            class="font-mono text-[10px] opacity-70"
+          >{{ a.duration_ms }} ms</span>
+        </div>
+      </div>
+
+      <div
+        v-if="streaming && visibleToolActivities.length === 0"
+        class="self-start inline-flex items-center gap-2 text-sm text-muted-foreground italic"
+      >
+        <IconLoader2 class="size-3.5 animate-spin" />
+        <span>{{ hasLlmActivity ? 'Generating…' : 'Thinking…' }}</span>
       </div>
     </div>
   </div>

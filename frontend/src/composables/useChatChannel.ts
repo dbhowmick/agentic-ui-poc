@@ -6,6 +6,7 @@ import type {
   A2uiClientAction,
   Message,
   SurfaceReplay,
+  ToolActivity,
   UsageStats,
 } from '@/types/chat'
 
@@ -37,6 +38,7 @@ export interface UseChatChannel {
   ready: ReturnType<typeof ref<boolean>>
   error: ReturnType<typeof ref<string | null>>
   envelopes: ReturnType<typeof ref<A2UIEnvelope[]>>
+  activities: ReturnType<typeof ref<ToolActivity[]>>
   send: (content: string) => void
   sendAction: (action: A2uiClientAction) => void
 }
@@ -51,6 +53,7 @@ export function useChatChannel(conversationId: string): UseChatChannel {
   const ready = ref(false)
   const error = ref<string | null>(null)
   const envelopes = ref<A2UIEnvelope[]>([])
+  const activities = ref<ToolActivity[]>([])
   const channelRef = shallowRef<Channel | null>(null)
   const streamingId = ref<string | null>(null)
 
@@ -69,12 +72,43 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     stampStreamingMessage(payload)
     streaming.value = false
     streamingId.value = null
+    activities.value = []
   })
 
   channel.on('error', ({ message }: ErrorPayload) => {
     error.value = message
     streaming.value = false
     streamingId.value = null
+    activities.value = []
+  })
+
+  // Tool lifecycle from the backend relay. `started` pushes the tool into the
+  // active list; `completed`/`failed` removes it. Failures hang around for a
+  // short visual ack so the user sees what blew up; success drops immediately
+  // — the rendered surface (or next text delta) is the real confirmation.
+  channel.on('tool_activity', (payload: ToolActivity) => {
+    if (payload.status === 'started') {
+      const existing = activities.value ?? []
+      activities.value = [
+        ...existing.filter((a) => a.tool_call_id !== payload.tool_call_id),
+        payload,
+      ]
+      return
+    }
+    if (payload.status === 'failed') {
+      const existing = activities.value ?? []
+      const next = existing.map((a) =>
+        a.tool_call_id === payload.tool_call_id ? { ...a, ...payload } : a,
+      )
+      activities.value = next
+      setTimeout(() => {
+        const list = activities.value ?? []
+        activities.value = list.filter((a) => a.tool_call_id !== payload.tool_call_id)
+      }, 2500)
+      return
+    }
+    const existing = activities.value ?? []
+    activities.value = existing.filter((a) => a.tool_call_id !== payload.tool_call_id)
   })
 
   channel.on('a2ui_replay', ({ surfaces }: ReplayPayload) => {
@@ -215,6 +249,7 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     messages.value = [...(messages.value ?? []), optimisticUser]
     streaming.value = true
     streamingId.value = null
+    activities.value = []
     channel.push('user_message', { content: trimmed }).receive('error', (err) => {
       streaming.value = false
       streamingId.value = null
@@ -247,6 +282,7 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     messages.value = [...(messages.value ?? []), optimisticAction]
     streaming.value = true
     streamingId.value = null
+    activities.value = []
     channel.push('a2ui_action', action as unknown as object).receive('error', (err) => {
       streaming.value = false
       streamingId.value = null
@@ -259,5 +295,5 @@ export function useChatChannel(conversationId: string): UseChatChannel {
     channelRef.value = null
   })
 
-  return { messages, streaming, ready, error, envelopes, send, sendAction }
+  return { messages, streaming, ready, error, envelopes, activities, send, sendAction }
 }

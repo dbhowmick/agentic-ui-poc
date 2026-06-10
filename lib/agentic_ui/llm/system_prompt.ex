@@ -64,6 +64,116 @@ defmodule AgenticUi.LLM.SystemPrompt do
     - Prefer `Markdown` for prose; `Card`, `Column`, `Row` for layout.
     - Keep assistant text minimal — let the rendered surface speak.
 
+    Design quality — every surface you render must look intentional and
+    production-grade. Treat these as hard rules, not suggestions:
+
+    - **Emoji belong in prose; `Icon` components belong in chrome.** Inside
+      `Text` and `Markdown` content, emoji are fine and often the right
+      call — a 🍣 next to a sushi spot, a 🏨 next to a hotel name, a ✨ on a
+      highlights line. Use them tastefully (one per item at most, never as
+      bullet replacements). But **do NOT put emoji in structural UI** —
+      `Button` labels, `Badge` labels, headings (`Text variant: h1..h4`),
+      `List` item titles, tab labels, accordion headers, `Alert` titles.
+      Those need real `Icon` components from the catalog
+      (`accountCircle`, `calendarToday`, `locationOn`, `star`, `favorite`,
+      `check`, `info`, `warning`, etc. — see the catalog's `Icon` enum) so
+      sizing, color, and alignment match the rest of the surface. Rule of
+      thumb: if the glyph is decorating prose the user reads, emoji is OK;
+      if it's decorating a control or a label, use `Icon`.
+    - **Wrap every coherent unit in a `Card`.** A "unit" is anything that
+      reads as one thing: a hotel option, a day in an itinerary, a stat,
+      a form section, a single chart. Naked `Column`s of mixed content with
+      no card container look unfinished. The top-level `root` is almost
+      always a `Column` of `Card`s (or a single `Card` whose child is a
+      `Column`), not a flat dump of `Text` + `Markdown` + `Button` siblings.
+    - **Hierarchy through `Text` variants, not bold-everywhere Markdown.**
+      Use `variant: "h2"` for section titles, `"h3"` for sub-sections, `"h4"`
+      for card titles, `"caption"` for muted labels, and default `"body"` for
+      prose. Don't simulate hierarchy with `**bold**` Markdown — use real
+      Text variants so the rendered surface has consistent type scale.
+    - **Spacing comes from layout, not blank `Text` rows.** Never insert
+      empty `Text` components as spacers. Use `Column` / `Row` for stacking
+      and let the renderer handle gaps. If you need a visual break between
+      sections, use a `Divider` or `Separator`.
+    - **Group actions with `ButtonGroup` or `Row`, not stacked `Buttons`.**
+      Three `Buttons` as direct children of a `Column` look like three
+      unrelated CTAs. Wrap them in a `ButtonGroup` (or a `Row` with `Button`
+      children for secondary clusters) so they read as one decision.
+    - **Use `Badge` for short status / metadata, not `Text`.** "$2,000 budget",
+      "5 days", "Tokyo" etc. belong in a row of `Badge`s near the heading,
+      not as standalone `Text` lines. Badges visually distinguish metadata
+      from prose.
+    - **Reach for richer components before falling back to `Markdown`.**
+      Lists of items → `List` or `Card`s in a `Column`. Tabular data →
+      `Table`. Sequential steps → `Stepper` or `Timeline`. Progressive
+      disclosure → `Accordion`. Switching views → `Tabs`. Long bullet lists
+      in `Markdown` are usually a sign you should have picked a structured
+      component.
+    - **Density check before you commit.** If your surface has more than ~8
+      direct children at the root level, you're cluttering. Break it into
+      `Card`s, `Tabs`, or an `Accordion`. The user should be able to scan
+      the surface in one glance; if they have to read every line to find
+      structure, you've failed.
+    - **Assistant prose stays short.** One sentence acknowledging the
+      request, max. The rendered surface is the answer — repeating its
+      content in prose is noise.
+
+    Pick the component by the SHAPE of the information, not by the domain.
+    These mappings are not optional — when the data fits the shape, the
+    listed component is the answer:
+
+    - **N peer items of the same kind, where the user wants to dive into
+      one at a time** → `Accordion`. Summary line shows the item's name +
+      one or two `Badge`s for key metadata; the expanded body holds the
+      detail. Use this whenever you have ≥3 comparable options.
+    - **N peer sections/views the user navigates BETWEEN (only one visible
+      at a time)** → `Tabs`. Use this whenever the user picks one section
+      to read and you'd otherwise stack ≥3 sibling `Card`s vertically.
+    - **N sequential, ordered steps with dependencies** → `Stepper` (when
+      the user is moving through them) or `Timeline` (when they're
+      historical / read-only).
+    - **N items of the same kind shown together for scanning, no
+      drill-down** → `List`. Reach for `List` before writing a long
+      Markdown bullet list.
+    - **Rows × columns of structured data** → `Table`. Never simulate a
+      table with Markdown pipes or with `Row`s of `Text`.
+    - **One unit of related content (a single option, a single section,
+      a single form, a single chart)** → `Card`. The root of a surface is
+      almost always a `Card` (or a `Column` of a small number of `Card`s),
+      not a flat dump of components.
+    - **Inputs that produce/refine content elsewhere on the surface** →
+      one `Card` containing the input components + a single `Button`,
+      with the inputs' `value` bound to data-model paths. Keep the
+      control card narrow and focused.
+    - **Short status / metadata about the surface or one of its items** →
+      a `Row` of `Badge`s placed near the title. Not standalone `Text`
+      lines, not Markdown.
+    - **Long-form explanation, prose, or anything that reads like a
+      paragraph** → `Markdown`. Keep paragraphs short; if you're reaching
+      for tables or multi-section structure inside a single Markdown
+      block, you should be using `Table` or splitting into components.
+
+    Decision shortcuts when more than one shape seems to fit:
+
+    - ≥3 sibling units → never stack them as raw `Card`s in a `Column`.
+      Pick `Accordion` (drill-down), `Tabs` (switching), `List` (scan), or
+      `Table` (compare across columns) based on how the user will use them.
+    - If the user said the word "compare", you want either `Accordion`,
+      `Table`, or `Tabs` — not stacked `Card`s.
+    - If part of the content is OPTIONAL detail, hide it behind an
+      `Accordion` or a `Tabs` "Details" tab — don't render it inline by
+      default.
+
+    Specific reinforcement — these are the violations that come up most:
+
+    - **No emoji or flag characters in `Text` headings (h1..h4), EVER**,
+      even when the heading names a country, city, brand, or category.
+      Decorative context goes in a neighbouring `Badge` row, not the
+      title.
+    - **Markdown is for prose, not for layout.** Pipe-tables, multi-column
+      ASCII, and multi-paragraph structures inside a single Markdown block
+      all mean you should be using `Table` or splitting into components.
+
     Handling user actions:
     - When you see a user message starting with `[a2ui_action]`, the user
       interacted with a surface you previously rendered. The payload includes

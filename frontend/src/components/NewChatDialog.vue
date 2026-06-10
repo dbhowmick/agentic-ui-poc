@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch } from "vue";
 import {
   Button,
   Dialog,
@@ -13,25 +13,25 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
-} from '@meldui/vue'
-import type { ConversationMode } from '@/types/chat'
+} from "@meldui/vue";
+import type { ConversationMode } from "@/types/chat";
 
 const props = defineProps<{
-  open: boolean
-  submitting?: boolean
-  defaultModel?: string
-}>()
+  open: boolean;
+  submitting?: boolean;
+  defaultModel?: string;
+}>();
 
 const emit = defineEmits<{
-  (e: 'update:open', value: boolean): void
-  (e: 'create', payload: { mode: ConversationMode; model: string; title: string | null }): void
-}>()
+  (e: "update:open", value: boolean): void;
+  (e: "create", payload: { mode: ConversationMode; model: string; title: string | null }): void;
+}>();
 
-const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929'
+const DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
 
-const mode = ref<ConversationMode>('tool_calls')
-const model = ref(props.defaultModel ?? DEFAULT_MODEL)
-const title = ref('')
+const mode = ref<ConversationMode>("tool_calls");
+const model = ref(props.defaultModel ?? DEFAULT_MODEL);
+const title = ref("");
 
 // Reset the form whenever the dialog opens so a previous half-filled draft
 // doesn't bleed into a fresh "New chat" click.
@@ -39,25 +39,25 @@ watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
-      mode.value = 'tool_calls'
-      model.value = props.defaultModel ?? DEFAULT_MODEL
-      title.value = ''
+      mode.value = "tool_calls";
+      model.value = props.defaultModel ?? DEFAULT_MODEL;
+      title.value = "";
     }
   },
-)
+);
 
 function onOpenChange(value: boolean) {
-  emit('update:open', value)
+  emit("update:open", value);
 }
 
 function submit() {
-  const trimmedModel = model.value.trim() || DEFAULT_MODEL
-  const trimmedTitle = title.value.trim()
-  emit('create', {
+  const trimmedModel = model.value.trim() || DEFAULT_MODEL;
+  const trimmedTitle = title.value.trim();
+  emit("create", {
     mode: mode.value,
     model: trimmedModel,
-    title: trimmedTitle === '' ? null : trimmedTitle,
-  })
+    title: trimmedTitle === "" ? null : trimmedTitle,
+  });
 }
 </script>
 
@@ -102,20 +102,13 @@ function submit() {
 
         <div class="flex flex-col gap-2">
           <Label for="new-chat-model">Model</Label>
-          <Input
-            id="new-chat-model"
-            v-model="model"
-            spellcheck="false"
-            autocomplete="off"
-          />
+          <Input id="new-chat-model" v-model="model" spellcheck="false" autocomplete="off" />
         </div>
 
         <DialogFooter>
-          <Button type="button" variant="ghost" @click="onOpenChange(false)">
-            Cancel
-          </Button>
+          <Button type="button" variant="ghost" @click="onOpenChange(false)"> Cancel </Button>
           <Button type="submit" :disabled="submitting">
-            {{ submitting ? 'Creating…' : 'Create chat' }}
+            {{ submitting ? "Creating…" : "Create chat" }}
           </Button>
         </DialogFooter>
       </form>

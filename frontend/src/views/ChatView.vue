@@ -13,7 +13,9 @@ import type { A2UIEnvelope, A2uiClientAction, Conversation, Message } from '@/ty
 
 const props = defineProps<{ id: string }>()
 
-const { messages, streaming, error, envelopes, send, sendAction } = useChatChannel(props.id)
+const { messages, streaming, error, envelopes, activities, send, sendAction } = useChatChannel(
+  props.id,
+)
 
 const conversation = ref<Conversation | null>(null)
 const inspectorOpen = ref(false)
@@ -140,7 +142,11 @@ const showPresets = computed(() => (messages.value ?? []).length === 0)
       </div>
     </header>
 
-    <ChatMessageList :messages="messages ?? []" :streaming="streaming ?? false" />
+    <ChatMessageList
+      :messages="messages ?? []"
+      :streaming="streaming ?? false"
+      :activities="activities ?? []"
+    />
 
     <ChatComposer
       :disabled="streaming ?? false"

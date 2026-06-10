@@ -41,6 +41,7 @@ defmodule AgenticUi.LLM.Agent do
       AgenticUi.LLM.Tools.DeleteSurface
     ],
     system_prompt: @system_prompt,
+    max_tokens: 16_384,
     llm_opts: [provider_options: [anthropic_prompt_cache: true]]
 
   alias AgenticUi.Chat.Schemas.Message
